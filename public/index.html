@@ -7,7 +7,7 @@
     <link rel="icon" href="data:," />
     <link rel="preload" href="./fonts/plus-jakarta-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="./fonts/plus-jakarta-sans-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="stylesheet" href="./styles.css?v=20260826-revenue-flow-proportional-ribbons" />
+    <link rel="stylesheet" href="./styles.css?v=20260826-agent-memory1" />
   </head>
   <body class="auth-pending app-loading">
     <section class="auth-shell" id="authShell" aria-labelledby="authTitle">
@@ -231,6 +231,17 @@
             </div>
           </div>
 
+          <button class="page-nav-button nav-primary-link" id="googleAdsNav" type="button" data-nav-primary="google-ads">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M8.5 5 3 15.5A3 3 0 0 0 5.6 20h.2a3 3 0 0 0 2.7-1.7L14 7.8"/><path d="m12.2 5 5.5 10.5"/><circle cx="18.3" cy="17" r="3"/></svg>
+            </span>
+            <span class="nav-group-copy">
+              <span data-i18n="nav.googleAds">Google Ads</span>
+              <small data-i18n="nav.googleAdsHint">Paid acquisition</small>
+            </span>
+            <span class="nav-primary-arrow" aria-hidden="true">↗</span>
+          </button>
+
           <div class="nav-group" data-nav-group="products">
             <button class="page-nav-button nav-group-toggle" id="productNav" type="button" aria-expanded="false" aria-controls="productsSubnav" data-nav-group-toggle>
               <span class="nav-icon" aria-hidden="true">
@@ -240,7 +251,7 @@
                 <span data-i18n="nav.productsOffers">Products & offers</span>
                 <small data-i18n="nav.productsOffersHint">Catalog & acquisition</small>
               </span>
-              <span class="nav-group-count" aria-hidden="true">03</span>
+              <span class="nav-group-count" aria-hidden="true">02</span>
               <span class="nav-chevron" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg>
               </span>
@@ -251,12 +262,6 @@
                   <svg viewBox="0 0 24 24"><path d="M7 4h10v3H7z"/><path d="M5 6h14v14H5z"/><path d="m8 12 2 2 4-4"/><path d="M8 17h8"/></svg>
                 </span>
                 <span data-i18n="nav.offerListTracker">Offer List Tracker</span>
-              </button>
-              <button class="page-nav-button" id="googleAdsNav" type="button">
-                <span class="nav-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="M8.5 5 3 15.5A3 3 0 0 0 5.6 20h.2a3 3 0 0 0 2.7-1.7L14 7.8"/><path d="m12.2 5 5.5 10.5"/><circle cx="18.3" cy="17" r="3"/></svg>
-                </span>
-                <span data-i18n="nav.googleAds">Google Ads</span>
               </button>
               <button class="page-nav-button" id="categoryNav" type="button">
                 <span class="nav-icon" aria-hidden="true">
@@ -2126,8 +2131,9 @@
     <script src="./onboarding_tour.js?v=20260806-chat-mode-glow3"></script>
     <script src="./chatbot_welcome.js?v=20260813-chat-reminder-copy1"></script>
     <script src="./tier2_recommendation_rules.js?v=20260626-tier2pub1"></script>
+    <script src="./agent_memory_state.js?v=20260826-agent-memory1"></script>
     <script async src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
-    <script src="./auth.js?v=20260821-offer-tracker-range1"></script>
+    <script src="./auth.js?v=20260826-agent-memory1"></script>
     <script>
       // Dashboard 深浅主题切换：默认浅色；状态存 localStorage（键 oi-dash-theme），
       // "dark" = 深色，其他/无值 = 浅色（body 挂 data-dash-theme="light"，仅 dashboard 页生效）。
