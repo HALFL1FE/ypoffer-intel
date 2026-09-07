@@ -3,6 +3,7 @@ import { createApp, defineAsyncComponent, defineComponent, h } from "vue";
 import type { Component } from "vue";
 
 import "./shared/styles/modern-root.css";
+import "./shared/styles/page-foundations.css";
 import "./features/offer-tracker/offerTracker.css";
 import "./features/payments/payments.css";
 import "./features/publishers/publishers.css";

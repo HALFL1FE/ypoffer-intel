@@ -1198,3 +1198,13 @@ M0–M6 的迁移与验收已完成，M7 已将页面切换权威收敛为 `Mode
 - 静态资源删除：`public/index.html` 仅保留认证、启动错误态和 `#modernAppRoot`；删除 `public/app.js`、`public/styles.css`、五个旧辅助脚本及旧 bridge/contracts。
 - 测试替换：删除只检查旧源码字符串的 Node 脚本，保留 Python 业务/协议测试；用 Vue 行为测试、shared XLSX fixture、迁移清单、构建及 M4/M6/M7 modern 契约覆盖当前实现。
 - 回滚边界：删除 `?legacy=1`、`OI_LEGACY_BRIDGE`、`OFFER_INTELLIGENCE_TEST_HOOKS` 和 Agent legacy runtime 模式。M8 回滚只能切换至上一份已验证部署，不恢复已删除源码。
+
+**M7 页面样式遗漏修复（2026-09-07，待视觉验收）：**
+
+- 基线：迁移分支 `b6ee21ee91d5c81f9bdd935f82b68a3e3cdb5c34`；样式来源为 main `9f6fc909409082698bdebc44ad19af6dce2f81d3`。删除 `public/styles.css` 时遗漏了仍被 Vue 模板使用的基础规则。现有组件测试只验证内容和行为，未验证入口 CSS 的实际应用。
+- 新增 modern-owned `frontend/src/shared/styles/page-foundations.css`，保留 Vue 源码使用的页面选择器、响应式规则及所需动画；排除旧认证/侧栏布局，将页面规则限制在 `[data-modern-root]`。入口在 feature overrides 之前导入，不恢复旧 JS、旧 DOM 或运行时回退。
+- 适配改名的 sheet/tier/category/monthly-new-merchants/payments 根容器；补齐卡片、筛选、表格、聊天模式按钮、图表折线与 tooltip 等基础规则。移除迁入规则对 `body.dashboard-mode` 的依赖；Chatbot 自有主题规则也改为识别现代 host。
+- Chatbot 高度直接由现存页面容器承担，不再依赖已删除的 `.chatbot-modern-root` 外层；报表响应式断点统一为 1120px，避免旧基础规则与 feature override 在平板宽度上冲突。
+- 新增 `frontend/tests/page-styles.test.ts`，按生产入口顺序读取 CSS，在 happy-dom 中检查报表 KPI 行、SVG `fill: none`、tooltip 默认隐藏、聊天控件布局、390px 媒体查询和页面外样式隔离。移除基础样式导入时，两项回归失败；恢复后四项通过。此检查不等同于真实浏览器几何布局/截图验收。
+- 已通过类型检查、双 Vite 生产构建；原有前端测试 65 文件/295 项通过，新增样式测试 4 项通过。
+- 未完成：真实浏览器截图验收（环境阻止访问本地预览）；不能据此宣称全部页面已达到视觉一致。截图中报表数值差异和 Chatbot 初始空报告状态需另行做行为/数据口径核对，本次不改业务计算，也不使用真实数据制作公开预览。
