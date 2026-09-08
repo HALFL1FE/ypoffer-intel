@@ -27,7 +27,8 @@ describe("共享 Shell 主题", () => {
     expect(values.get("oi-dash-theme")).toBe("dark");
     applyTheme(documentRef, "dark");
     expect(documentRef.body.dataset.oiTheme).toBe("dark");
-    expect(documentRef.body.dataset.dashTheme).toBeUndefined();
+    expect(documentRef.body.dataset.dashTheme).toBe("dark");
+    expect(documentRef.documentElement.style.colorScheme).toBe("dark");
 
     writeStoredTheme(storage, "light");
     applyTheme(documentRef, "light");

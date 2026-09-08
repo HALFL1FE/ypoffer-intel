@@ -10,8 +10,7 @@ import {
   pageLabel,
   pageTitle,
   type NavigationGroupKey,
-  type NavigationIconName,
-  type NavigationLocation
+  type NavigationIconName
 } from "./navigation";
 import { usePageState } from "./usePageState";
 import { applyTheme, readStoredTheme, writeStoredTheme, type ShellTheme } from "./theme";
@@ -26,6 +25,10 @@ const copy = {
     sidebarControls: "侧边栏控制",
     openMenu: "打开导航",
     closeMenu: "关闭导航",
+    collapseNavigation: "收起为悬浮导航条",
+    expandNavigation: "展开导航面板",
+    browse: "探索工作空间",
+    currentPage: "当前页面",
     language: "切换到英文",
     languageShort: "EN",
     languageEnglish: "English",
@@ -43,6 +46,10 @@ const copy = {
     sidebarControls: "Sidebar controls",
     openMenu: "Open navigation",
     closeMenu: "Close navigation",
+    collapseNavigation: "Collapse to navigation dock",
+    expandNavigation: "Expand navigation panel",
+    browse: "YOUR WORKSPACE",
+    currentPage: "CURRENT PAGE",
     language: "切换到中文",
     languageShort: "中文",
     languageEnglish: "English",
@@ -87,6 +94,7 @@ const state = usePageState(props.initialPage, props.userLevel);
 const currentPage = state.currentPage;
 const isCompact = state.isCompact;
 const isMenuOpen = state.isMenuOpen;
+const isDocked = ref(false);
 const currentLanguage = ref<UiLanguage>(props.language);
 const theme = ref<ShellTheme>(readStoredTheme(props.storage ?? getBrowserStorage()));
 const sidebarRef = ref<HTMLElement | null>(null);
@@ -118,13 +126,16 @@ const languageButtonLabel = computed(() => currentLanguage.value === "zh" ? tran
 const visibleNavigationGroups = computed(() => NAVIGATION_GROUPS
   .map((group) => ({ ...group, items: group.items.filter((item) => canAccessPage(props.userLevel, item.page)) }))
   .filter((group) => group.items.length > 0));
+const groupIcons: Record<NavigationGroupKey, NavigationIconName> = {
+  workspace: "targets", merchants: "tier", media: "publishers", products: "products"
+};
 
 function isPageAllowed(page: ModernPageName): boolean {
   return canAccessPage(props.userLevel, page);
 }
 
 function isGroupOpen(group: NavigationGroupKey): boolean {
-  return state.openGroup.value === group;
+  return state.openGroup.value === group && (!isDocked.value || isCompact.value);
 }
 
 function isPageActive(page: ModernPageName): boolean {
@@ -133,11 +144,18 @@ function isPageActive(page: ModernPageName): boolean {
 
 function selectPage(page: ModernPageName): void {
   if (!isPageAllowed(page)) return;
+  const restoreFocus = state.isCompact.value && state.isMenuOpen.value;
   state.setPage(page);
   props.navigate(page);
+  if (restoreFocus) nextTick(() => menuTriggerRef.value?.focus({ preventScroll: true }));
 }
 
 function toggleGroup(group: NavigationGroupKey): void {
+  if (isDocked.value && !isCompact.value) {
+    isDocked.value = false;
+    state.openGroup.value = group;
+    return;
+  }
   state.toggleGroup(group);
 }
 
@@ -156,7 +174,10 @@ function focusableSidebarElements(): HTMLElement[] {
   if (!sidebar) return [];
   return Array.from(sidebar.querySelectorAll<HTMLElement>(
     'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-  )).filter((element) => element.getAttribute("aria-hidden") !== "true" && !element.closest('[aria-hidden="true"]'));
+  )).filter((element) => {
+    const style = document.defaultView?.getComputedStyle(element);
+    return !element.closest('[aria-hidden="true"], [inert]') && style?.display !== "none" && style?.visibility !== "hidden";
+  });
 }
 
 function closeMenu(restoreFocus = false): void {
@@ -220,7 +241,7 @@ watch(state.isMenuOpen, (open) => {
 
 onMounted(() => {
   const view = document.defaultView;
-  mediaQuery = view?.matchMedia?.("(max-width: 1120px)") ?? null;
+  mediaQuery = view?.matchMedia?.("(max-width: 960px)") ?? null;
   syncViewport();
   if (mediaQuery?.addEventListener) {
     mediaQuery.addEventListener("change", syncViewport);
@@ -257,7 +278,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="modern-shell"
-    :class="{ 'is-compact': isCompact, 'is-menu-open': isMenuOpen }"
+    :class="{ 'is-compact': isCompact, 'is-menu-open': isMenuOpen, 'is-docked': isDocked && !isCompact }"
     :data-theme="theme"
     :data-page="currentPage"
     :aria-label="translate('shellLabel')"
@@ -289,6 +310,7 @@ onBeforeUnmount(() => {
       type="button"
       :aria-label="translate('closeMenu')"
       :aria-hidden="!isMenuOpen"
+      :tabindex="isMenuOpen ? 0 : -1"
       @click="closeMenu(true)"
     ></button>
 
@@ -301,11 +323,23 @@ onBeforeUnmount(() => {
       :inert="isCompact && !isMenuOpen"
     >
       <div class="modern-shell-brand">
-        <div class="modern-shell-brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="modern-shell-brand-mark" aria-hidden="true">YP<span></span></div>
         <div class="modern-shell-brand-copy">
           <strong>YeahPromos</strong>
           <span>{{ translate("brandSubtitle") }}</span>
         </div>
+        <button
+          class="modern-shell-dock-toggle"
+          type="button"
+          data-shell-dock
+          :aria-label="translate(isDocked ? 'expandNavigation' : 'collapseNavigation')"
+          :title="translate(isDocked ? 'expandNavigation' : 'collapseNavigation')"
+          :aria-expanded="!isDocked"
+          aria-controls="modernShellNavigation"
+          @click="isDocked = !isDocked"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM9 5v14m6-10-3 3 3 3" /></svg>
+        </button>
         <button
           ref="closeButtonRef"
           class="modern-shell-close"
@@ -317,35 +351,8 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="modern-shell-controls" :aria-label="translate('sidebarControls')">
-        <button
-          class="modern-shell-control"
-          type="button"
-          data-shell-language
-          :aria-label="languageActionLabel"
-          @click="toggleLanguage"
-        >
-          <span class="modern-shell-control-icon" aria-hidden="true">文</span>
-          <span>{{ languageButtonLabel }}</span>
-        </button>
-        <button
-          class="modern-shell-control"
-          type="button"
-          data-shell-theme
-          :aria-label="themeActionLabel"
-          :title="themeActionLabel"
-          @click="toggleTheme"
-        >
-          <span class="modern-shell-control-icon" aria-hidden="true">{{ theme === "light" ? "☾" : "☼" }}</span>
-          <span>{{ theme === "light" ? translate("darkTheme") : translate("lightTheme") }}</span>
-        </button>
-        <button id="modernLogoutButton" class="modern-shell-control modern-shell-logout" type="button">
-          <span class="modern-shell-control-icon" aria-hidden="true">↪</span>
-          <span>{{ translate("signOut") }}</span>
-        </button>
-      </div>
-
-      <nav class="modern-shell-nav" :aria-label="translate('navigation')">
+      <nav id="modernShellNavigation" class="modern-shell-nav" :aria-label="translate('navigation')">
+        <p class="modern-shell-nav-caption">{{ translate("browse") }}</p>
         <section
           v-for="group in visibleNavigationGroups"
           :key="group.key"
@@ -358,46 +365,48 @@ onBeforeUnmount(() => {
             type="button"
             :aria-expanded="isGroupOpen(group.key)"
             :aria-controls="`modernShellSubnav-${group.key}`"
+            :aria-label="localized(group.label)"
+            :title="localized(group.label)"
             @click="toggleGroup(group.key)"
           >
             <span class="modern-shell-nav-icon modern-shell-group-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path :d="iconPaths[group.items[0]?.icon || 'products'][0]" /></svg>
+              <svg viewBox="0 0 24 24"><path v-for="path in iconPaths[groupIcons[group.key]]" :key="path" :d="path" /></svg>
             </span>
             <span class="modern-shell-group-copy">
               <strong>{{ localized(group.label) }}</strong>
-              <small>{{ localized(group.hint) }}</small>
             </span>
-            <span class="modern-shell-group-count" aria-hidden="true">{{ String(group.items.length).padStart(2, "0") }}</span>
-            <span class="modern-shell-chevron" aria-hidden="true">⌄</span>
+            <span class="modern-shell-chevron" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg></span>
           </button>
-          <div
-            :id="`modernShellSubnav-${group.key}`"
-            class="modern-shell-subnav"
-            :aria-hidden="!isGroupOpen(group.key)"
-            v-show="isGroupOpen(group.key)"
-          >
-            <button
-              v-for="item in group.items"
-              :key="item.page"
-              class="modern-shell-nav-item"
-              :class="{ active: isPageActive(item.page) }"
-              type="button"
-              :data-shell-nav-page="item.page"
-              :aria-current="isPageActive(item.page) ? 'page' : undefined"
-              @click="selectPage(item.page)"
+          <Transition name="modern-shell-reveal">
+            <div
+              :id="`modernShellSubnav-${group.key}`"
+              class="modern-shell-subnav"
+              :aria-hidden="!isGroupOpen(group.key)"
+              v-show="isGroupOpen(group.key)"
             >
-              <span class="modern-shell-nav-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <path v-for="path in iconPaths[item.icon]" :key="path" :d="path" />
-                </svg>
-              </span>
-              <span class="modern-shell-item-copy">
-                <strong>{{ localized(item.label) }}</strong>
-                <small>{{ localized(item.hint) }}</small>
-              </span>
-              <span v-if="isPageActive(item.page)" class="modern-shell-active-dot" aria-hidden="true"></span>
-            </button>
-          </div>
+              <button
+                v-for="item in group.items"
+                :key="item.page"
+                class="modern-shell-nav-item"
+                :class="{ active: isPageActive(item.page) }"
+                type="button"
+                :data-shell-nav-page="item.page"
+                :aria-current="isPageActive(item.page) ? 'page' : undefined"
+                @click="selectPage(item.page)"
+              >
+                <span class="modern-shell-nav-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path v-for="path in iconPaths[item.icon]" :key="path" :d="path" />
+                  </svg>
+                </span>
+                <span class="modern-shell-item-copy">
+                  <strong>{{ localized(item.label) }}</strong>
+                  <small>{{ localized(item.hint) }}</small>
+                </span>
+                <span v-if="isPageActive(item.page)" class="modern-shell-active-dot" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5" /></svg></span>
+              </button>
+            </div>
+          </Transition>
         </section>
 
         <button
@@ -407,6 +416,8 @@ onBeforeUnmount(() => {
           type="button"
           data-shell-nav-page="google-ads"
           :aria-current="isPageActive(GOOGLE_ADS_NAVIGATION_ITEM.page) ? 'page' : undefined"
+          :aria-label="localized(GOOGLE_ADS_NAVIGATION_ITEM.label)"
+          :title="localized(GOOGLE_ADS_NAVIGATION_ITEM.label)"
           @click="selectPage(GOOGLE_ADS_NAVIGATION_ITEM.page)"
         >
           <span class="modern-shell-nav-icon" aria-hidden="true">
@@ -421,10 +432,42 @@ onBeforeUnmount(() => {
       </nav>
 
       <footer class="modern-shell-footer">
-        <span class="modern-shell-footer-pulse" aria-hidden="true"></span>
-        <span>{{ currentPageLabel }}</span>
-        <small>{{ theme === "light" ? translate("lightTheme") : translate("darkTheme") }}</small>
+        <small>{{ translate("currentPage") }}</small>
+        <span :key="currentPageLabel" class="modern-shell-current-page">{{ currentPageLabel }}</span>
       </footer>
+      <div class="modern-shell-controls" :aria-label="translate('sidebarControls')">
+        <button
+          class="modern-shell-control"
+          type="button"
+          data-shell-language
+          :aria-label="languageActionLabel"
+          :title="languageActionLabel"
+          @click="toggleLanguage"
+        >
+          <span class="modern-shell-control-icon" aria-hidden="true">文</span>
+          <span class="modern-shell-control-label">{{ languageButtonLabel }}</span>
+        </button>
+        <button
+          class="modern-shell-control"
+          type="button"
+          data-shell-theme
+          :aria-label="themeActionLabel"
+          :title="themeActionLabel"
+          :aria-pressed="theme === 'dark'"
+          @click="toggleTheme"
+        >
+          <span class="modern-shell-control-icon" aria-hidden="true">
+            <svg v-if="theme === 'light'" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z" /></svg>
+            <svg v-else viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></svg>
+          </span>
+          <span class="modern-shell-control-label">{{ theme === "light" ? translate("darkTheme") : translate("lightTheme") }}</span>
+        </button>
+        <button id="modernLogoutButton" class="modern-shell-control modern-shell-logout" type="button" :aria-label="translate('signOut')" :title="translate('signOut')">
+          <span class="modern-shell-control-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4H4v16h5m5-12 4 4-4 4m-6-4h12" /></svg></span>
+          <span class="modern-shell-control-label">{{ translate("signOut") }}</span>
+        </button>
+      </div>
+
     </aside>
   </div>
 </template>
