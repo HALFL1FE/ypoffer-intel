@@ -1,6 +1,7 @@
 import type { UiLanguage } from "../../shared/i18n";
 import type { ChatbotReportResult as ChatbotModelReportResult } from "./chatbotReportModel";
 import type { DeepWindowStore } from "./deepWindowStore";
+import type { ReportDocument, ReportSnapshot } from "./report/reportContracts";
 
 export type ChatbotMode = "report" | "chat";
 export type ChatbotDataSource = "cache" | "db" | "unavailable";
@@ -70,6 +71,8 @@ export interface ChatbotSessionResult {
   readonly recommendationHtml?: string;
   readonly reportSnapshot?: unknown;
   readonly report?: ChatbotReportViewResult;
+  readonly document?: ReportDocument;
+  readonly memoryRecommendation?: import("./report/reportContracts").MemoryRecommendation;
   readonly deepWindowId?: string | null;
   readonly answerId?: string | null;
   readonly feedbackState?: ChatbotAnswerFeedbackState;
@@ -81,6 +84,8 @@ export type ChatbotReportViewResult = ChatbotModelReportResult & {
   readonly title?: string;
   readonly contentHtml?: string;
   readonly recommendationHtml?: string;
+  readonly document?: ReportDocument;
+  readonly reportSnapshot?: ReportSnapshot;
   readonly sessionResult?: ChatbotSessionResult;
 };
 
@@ -150,7 +155,7 @@ export interface ChatbotSession {
   removeMemory(memoryId: string): void;
   clearConversation(): void;
   downloadOverview?(): boolean;
-  downloadRecommendation?(downloadId: string): boolean;
+  downloadRecommendation?(downloadId: string, answerId?: string): boolean;
   openDeepWindow?(): string | null;
   onChange(listener: (state: ChatbotViewState) => void): () => void;
   feedback?: ChatbotFeedback;
@@ -158,6 +163,9 @@ export interface ChatbotSession {
   toggleHelp?: () => boolean;
   toggleGuide?: () => boolean;
   startOnboarding?: () => boolean;
+  nextOnboarding?: () => boolean;
+  backOnboarding?: () => boolean;
+  skipOnboarding?: () => boolean;
   feedbackForAnswer?(answerId: string): ChatbotFeedback | null;
   feedbackForDeepWindow?(windowId: string): ChatbotFeedback | null;
   openChatAnswer?(answerId: string): string | null;

@@ -131,8 +131,9 @@ function downloadLogs(kind: "questions" | "feedback", format: "csv" | "jsonl"): 
   props.session?.downloadLogs?.(kind, format);
 }
 
-function downloadRecommendation(downloadId: string): void {
-  props.session?.downloadRecommendation?.(downloadId);
+function downloadRecommendation(downloadId: string, answerId?: string): void {
+  if (answerId) props.session?.downloadRecommendation?.(downloadId, answerId);
+  else props.session?.downloadRecommendation?.(downloadId);
 }
 
 function downloadOverview(): void {
@@ -149,6 +150,18 @@ function toggleGuide(): void {
 
 function startOnboarding(): void {
   props.session?.startOnboarding?.();
+}
+
+function nextOnboarding(): void {
+  props.session?.nextOnboarding?.();
+}
+
+function backOnboarding(): void {
+  props.session?.backOnboarding?.();
+}
+
+function skipOnboarding(): void {
+  props.session?.skipOnboarding?.();
 }
 
 function clearConversation(): void {
@@ -248,6 +261,13 @@ function syncSessionState(next: ChatbotViewState = props.session!.getState()): v
   if (next.currentResult && next.currentResult.mode === "report") {
     reportResult.value = sessionResultToView(next.currentResult, reportPrompt.value || reportResult.value?.query || "");
     report.hasError.value = next.currentResult.ok === false;
+    const answerId = next.currentResult.answerId;
+    if (answerId) {
+      const refreshedView = sessionResultToView(next.currentResult, reportPrompt.value || reportResult.value?.query || "");
+      deepWindowsState.value.windows
+        .filter((item) => item.result.sessionResult?.answerId === answerId)
+        .forEach((item) => deepWindowController.updateResult(item.id, refreshedView));
+    }
   } else if (!next.currentResult) {
     reportResult.value = null;
     report.hasError.value = false;
@@ -366,7 +386,23 @@ function cancelDeepWindowById(id: string): void {
 }
 
 function interactDeepWindowById(id: string, action: DeepWindowInteraction, value?: string): void {
+  const window = displayedDeepWindows.value.find((item) => item.id === id);
+  const current = props.session?.getState().currentResult;
+  if (window?.result.sessionResult?.answerId && window.result.sessionResult.answerId === current?.answerId) {
+    if (props.session?.interactContext?.(action, value)) return;
+  }
   deepWindowController.interact(id, action, value);
+}
+
+function interactDeepWindowContext(id: string, action: string, value?: string): void {
+  const window = displayedDeepWindows.value.find((item) => item.id === id);
+  const current = props.session?.getState().currentResult;
+  if (window?.result.sessionResult?.answerId && window.result.sessionResult.answerId === current?.answerId) {
+    if (props.session?.interactContext?.(action, value)) return;
+  }
+  if (["trend-metric", "trend-category", "trend-column-toggle", "trend-column-core", "trend-column-all"].includes(action)) {
+    deepWindowController.interact(id, action as DeepWindowInteraction, value);
+  }
 }
 
 function setDeepWindowTrendColumns(id: string, columns: readonly string[]): void {
@@ -495,6 +531,9 @@ onBeforeUnmount(() => {
       :utility="utilityState"
       :available="Boolean(session.startOnboarding)"
       @start="startOnboarding"
+      @next="nextOnboarding"
+      @back="backOnboarding"
+      @skip="skipOnboarding"
     />
     <ChatbotReportView
       v-if="mode === 'report'"
@@ -723,6 +762,7 @@ onBeforeUnmount(() => {
       @export="exportDeepWindowById(window.id)"
       @cancel="cancelDeepWindowById(window.id)"
       @download="downloadRecommendation"
+      @context-interact="(action, value) => interactDeepWindowContext(window.id, action, value)"
       @trend-interact="(action, value) => interactDeepWindowById(window.id, action, value)"
       @trend-columns="(columns) => setDeepWindowTrendColumns(window.id, columns)"
       @drop-memory="addDeepWindowToMemory(window.id)"

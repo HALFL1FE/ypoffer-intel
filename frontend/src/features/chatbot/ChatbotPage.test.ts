@@ -37,6 +37,57 @@ const offers = [
 ];
 
 describe("ChatbotPage", () => {
+  it("首次引导显示可访问遮罩并高亮当前页面目标", async () => {
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      top: 120, left: 80, width: 140, height: 36, right: 220, bottom: 156,
+      x: 80, y: 120, toJSON: () => ({})
+    });
+    const state: ChatbotViewState = {
+      mode: "report",
+      language: "en",
+      hasMemory: false,
+      source: "cache",
+      status: "idle",
+      history: [],
+      messages: [],
+      memory: [],
+      currentResult: null,
+      utility: {
+        helpOpen: false,
+        guideOpen: false,
+        helpHtml: "",
+        guideHtml: "",
+        guideLoading: false,
+        onboardingOpen: true,
+        onboardingStep: 0,
+        onboardingTotal: 5,
+        reminderVisible: false,
+        reminderCollapsed: false
+      }
+    };
+    const session = {
+      getState: () => state,
+      setMode: vi.fn(),
+      submit: vi.fn(),
+      removeMemory: vi.fn(),
+      clearConversation: vi.fn(),
+      startOnboarding: vi.fn(() => true),
+      nextOnboarding: vi.fn(() => true),
+      backOnboarding: vi.fn(() => true),
+      skipOnboarding: vi.fn(() => false),
+      onChange: vi.fn(() => () => undefined)
+    };
+    const wrapper = mount(ChatbotPage, { props: { language: "en", offers, session, autoFocus: false }, attachTo: document.body });
+
+    await nextTick();
+    await nextTick();
+    expect(wrapper.find("[data-chatbot-onboarding-overlay]").exists()).toBe(true);
+    expect(wrapper.find("[data-chatbot-onboarding-target]").attributes("data-target-ready")).toBe("true");
+    expect(wrapper.find("[data-onboarding-step]").text()).toContain("1");
+    wrapper.unmount();
+    rectSpy.mockRestore();
+  });
+
   it("uses the Legacy Report Mode copy and keeps the original control row", () => {
     const wrapper = mount(ChatbotPage, {
       props: { language: "zh", offers, autoFocus: false }

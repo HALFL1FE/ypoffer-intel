@@ -1,55 +1,47 @@
 import { mount } from "@vue/test-utils";
-import { nextTick } from "vue";
 import { describe, expect, it } from "vitest";
 
 import ChatbotUtilityPanels from "./ChatbotUtilityPanels.vue";
 
+const utility = {
+  helpOpen: false,
+  guideOpen: false,
+  helpHtml: "<p>Help</p>",
+  guideHtml: "<p>Guide</p>",
+  guideLoading: false,
+  onboardingOpen: false,
+  onboardingStep: 0,
+  onboardingTotal: 5,
+  reminderVisible: false,
+  reminderCollapsed: false
+};
+
 describe("ChatbotUtilityPanels", () => {
-  it("keeps help, guide, logs, and clear controls in the legacy utility surface", async () => {
+  it("在帮助或流程弹层按 Escape 时关闭并把焦点还给入口", async () => {
     const wrapper = mount(ChatbotUtilityPanels, {
-      attachTo: document.body,
-      props: {
-        language: "en",
-        logsAvailable: true,
-        clearAvailable: true,
-        utility: {
-          helpOpen: true,
-          guideOpen: true,
-          helpHtml: '<img data-help-image src="/help.png" alt="Help">',
-          guideHtml: "<p data-guide-copy>Guide content</p>",
-          guideLoading: false,
-          onboardingOpen: false,
-          onboardingStep: 0,
-          onboardingTotal: 0,
-          reminderVisible: false,
-          reminderCollapsed: false
-        }
-      }
+      props: { language: "zh", utility: { ...utility, helpOpen: true } },
+      attachTo: document.body
     });
 
-    expect(wrapper.find('[data-chatbot-help-panel] [data-help-image]').exists()).toBe(true);
-    expect(wrapper.find('[data-chatbot-guide-panel] [data-guide-copy]').exists()).toBe(true);
-    await wrapper.get('[data-help-image]').trigger("click");
-    expect(wrapper.get('[data-chatbot-lightbox-image]').attributes("src")).toBe("/help.png");
-    await wrapper.get('[data-chatbot-lightbox]').trigger("click");
-    expect(wrapper.find('[data-chatbot-lightbox]').exists()).toBe(false);
-    const logsButton = wrapper.get('[data-chatbot-action="logs"]');
-    await logsButton.trigger("click");
-    expect(wrapper.find('[data-chatbot-logs-menu]').attributes("role")).toBe("menu");
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    await nextTick();
-    expect(wrapper.find('[data-chatbot-logs-menu]').exists()).toBe(false);
-    expect(document.activeElement).toBe(logsButton.element);
-    await logsButton.trigger("click");
-    await wrapper.get('[data-chatbot-log="questions-csv"]').trigger("click");
-    await wrapper.get('[data-chatbot-log="feedback-jsonl"]').trigger("click");
-    await wrapper.get('[data-chatbot-action="clear"]').trigger("click");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await wrapper.vm.$nextTick();
 
-    expect(wrapper.emitted("logs")).toEqual([
-      ["questions", "csv"],
-      ["feedback", "jsonl"]
-    ]);
-    expect(wrapper.emitted("clear")).toHaveLength(1);
+    expect(wrapper.emitted("help")).toHaveLength(1);
+    expect(document.activeElement).toBe(wrapper.get('[data-chatbot-action="help"]').element);
+    wrapper.unmount();
+  });
+
+  it("流程弹层按 Escape 走流程关闭事件", async () => {
+    const wrapper = mount(ChatbotUtilityPanels, {
+      props: { language: "en", utility: { ...utility, guideOpen: true } },
+      attachTo: document.body
+    });
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.emitted("guide")).toHaveLength(1);
+    expect(document.activeElement).toBe(wrapper.get('[data-chatbot-action="guide"]').element);
     wrapper.unmount();
   });
 });

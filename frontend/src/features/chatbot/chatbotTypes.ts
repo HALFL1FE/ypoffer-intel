@@ -1,11 +1,15 @@
 export type ChatbotIntent =
   | "asin"
   | "merchant"
+  | "keyword"
   | "payment"
   | "recommendation"
   | "tier"
   | "category"
-  | "analysis";
+  | "analysis"
+  | "publisher"
+  | "publisherprofile"
+  | "help";
 
 export type ChatbotMetricOperator = "gt" | "gte" | "lt" | "lte" | "eq";
 

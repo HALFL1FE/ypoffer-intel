@@ -48,7 +48,7 @@ const emit = defineEmits<{
   (event: "starter-prompt", value: string): void;
   (event: "open-answer", answerId: string): void;
   (event: "context-interact", action: string, value?: string): void;
-  (event: "download", downloadId: string): void;
+  (event: "download", downloadId: string, answerId?: string): void;
 }>();
 
 const starterCollapsed = ref(false);
@@ -122,15 +122,20 @@ function handleDownload(event: MouseEvent): void {
   const root = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   if (!target || !root || !root.contains(target)) return;
   const downloadId = target.getAttribute("data-download-id")?.trim();
-  if (downloadId) emit("download", downloadId.slice(0, 120));
+  const answerId = target.closest<HTMLElement>("[data-chatbot-answer-id]")?.getAttribute("data-chatbot-answer-id")?.trim()
+    || props.currentResult?.answerId || undefined;
+  if (downloadId) {
+    if (answerId) emit("download", downloadId.slice(0, 120), answerId);
+    else emit("download", downloadId.slice(0, 120));
+  }
 }
 
 function handleContextInteraction(event: Event): void {
   const target = event.target instanceof HTMLElement
-    ? event.target.closest<HTMLElement>("[data-trend-metric], [data-trend-category-select], [data-trend-column-toggle], [data-trend-column-core], [data-trend-column-all], [data-payment-month], [data-context-action]")
+    ? event.target.closest<HTMLElement>("[data-trend-metric], [data-trend-metric-select], [data-trend-category-select], [data-trend-column-toggle], [data-trend-column-core], [data-trend-column-all], [data-payment-month], [data-context-action]")
     : null;
   if (!target) return;
-  if (target.matches("[data-trend-metric]")) {
+  if (target.matches("[data-trend-metric], [data-trend-metric-select]")) {
     const metric = target.getAttribute("data-trend-metric");
     if (metric) emit("context-interact", "trend-metric", metric);
   } else if (target.matches("[data-trend-category-select]")) {
@@ -211,7 +216,7 @@ function handleReminderInteraction(event: MouseEvent): void {
               </div>
             </div>
           </aside>
-          <article v-for="message in messages" :key="message.id" class="message" :class="message.role">
+          <article v-for="message in messages" :key="message.id" class="message" :class="message.role" :data-chatbot-answer-id="message.role === 'assistant' ? (message.answerId || message.id) : undefined">
             <div v-if="message.role === 'assistant'" class="chat-stream-text" v-html="messageHtml(message)"></div>
             <div v-else class="chat-stream-text"><p>{{ message.content }}</p></div>
             <span v-if="message.streaming" class="chatbot-chat-cursor" aria-hidden="true"></span>
