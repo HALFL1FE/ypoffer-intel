@@ -18,6 +18,49 @@ function storageFixture(): Storage {
 }
 
 describe("AppShell", () => {
+  it("收起后保留分组名称，点击分组展开对应页面，选中状态不丢失", async () => {
+    const navigate = vi.fn();
+    const wrapper = mount(AppShell, { props: { initialPage: "agent", userLevel: 0, language: "zh", navigate, storage: storageFixture() } });
+    await wrapper.get("[data-shell-dock]").trigger("click");
+    expect(wrapper.get(".modern-shell").classes()).toContain("is-docked");
+    expect(wrapper.get('[data-shell-group="workspace"] button').attributes("aria-label")).toBe("工作台");
+    expect(wrapper.get('[data-shell-group="workspace"] button').attributes("aria-expanded")).toBe("false");
+    expect(wrapper.get('[data-shell-nav-page="agent"]').attributes("aria-current")).toBe("page");
+    await wrapper.get('[data-shell-group="merchants"] button').trigger("click");
+    expect(wrapper.get(".modern-shell").classes()).not.toContain("is-docked");
+    expect(wrapper.get('[data-shell-group="merchants"] button').attributes("aria-expanded")).toBe("true");
+    await wrapper.get('[data-shell-nav-page="payments"]').trigger("click");
+    expect(navigate).toHaveBeenCalledWith("payments");
+    expect(wrapper.get('[data-shell-nav-page="payments"]').attributes("aria-current")).toBe("page");
+    wrapper.unmount();
+  });
+
+  it("移动端导航在选择页面后解除工作区 inert，并将焦点还给菜单按钮", async () => {
+    const query = vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    vi.stubGlobal("matchMedia", query);
+    const workspace = document.createElement("main");
+    workspace.setAttribute("data-modern-workspace", "true");
+    document.body.append(workspace);
+    const wrapper = mount(AppShell, { attachTo: document.body, props: { initialPage: "agent", userLevel: 0, language: "en", navigate: vi.fn(), storage: storageFixture() } });
+    try {
+      await nextTick();
+      expect(query).toHaveBeenCalledWith("(max-width: 960px)");
+      await wrapper.get(".modern-shell-menu-trigger").trigger("click");
+      await nextTick();
+      expect(workspace.inert).toBe(true);
+      expect(document.activeElement).toBe(wrapper.get(".modern-shell-close").element);
+      await wrapper.get('[data-shell-nav-page="dashboard"]').trigger("click");
+      await nextTick();
+      expect(workspace.inert).toBe(false);
+      expect(workspace.hasAttribute("aria-hidden")).toBe(false);
+      expect(document.activeElement).toBe(wrapper.get(".modern-shell-menu-trigger").element);
+      expect(wrapper.get(".modern-shell-sidebar").attributes("inert")).toBeDefined();
+    } finally {
+      wrapper.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("渲染统一导航、语言/主题/退出入口并委托页面切换", async () => {
     const navigate = vi.fn();
     const setLanguage = vi.fn();

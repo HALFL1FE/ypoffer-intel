@@ -18,7 +18,7 @@ describe("共享 Shell 页面状态", () => {
     expect(state.isMenuOpen.value).toBe(false);
   });
 
-  it("只允许一个分组展开，并保持当前页面分组可用", () => {
+  it("只允许一个分组展开，当前分组也能收起，导航后重新展开", () => {
     const state = usePageState("payments");
 
     expect(state.openGroup.value).toBe("merchants");
@@ -28,6 +28,8 @@ describe("共享 Shell 页面状态", () => {
     expect(state.openGroup.value).toBeNull();
     state.toggleGroup("merchants");
     state.toggleGroup("merchants");
+    expect(state.openGroup.value).toBeNull();
+    state.setPage("payments");
     expect(state.openGroup.value).toBe("merchants");
   });
 

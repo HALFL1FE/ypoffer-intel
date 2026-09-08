@@ -30,7 +30,7 @@ assert(category.includes("cubic-bezier(0.32, 0.72, 0, 1)"), "Category report 交
 assert(!/^\\s*\\.dashboard-category-report\\s*\\{/m.test(category), "Category report 出现未局部化的面板选择器");
 assertRuleContains(category, ".category-page-modern .dashboard-category-report-table thead th", "position: sticky", "Category report 表格缺少粘性表头");
 assert(category.includes("@media (prefers-reduced-motion: reduce)"), "Category report 缺少 reduced-motion 降级");
-assert(category.includes("--category-muted: #536a74"), "Category report 小字号文本缺少可读对比度颜色");
+assert(category.includes("--category-muted: light-dark(#536a74, #a5b4c8)"), "Category report 小字号文本缺少深浅主题对比度颜色");
 assert(!category.includes("#71828b"), "Category report 仍使用对比度不足的旧灰色");
 
 assert(tier.includes(".tier-page-modern > .tier-category-summary"), "Tier category summary 缺少局部高级面板样式");
@@ -46,7 +46,7 @@ assert(stickySelectionRule && stickySelectionRule[1].includes("position: sticky"
 assert(tier.includes(".tier-page-modern > .tier-table-panel .icon-button:focus-visible"), "Tier Sheet Records 操作按钮缺少焦点反馈");
 assert(tier.includes("@media (max-width: 680px)"), "Tier 报表缺少 680px 移动端覆盖");
 assert(tier.includes("@media (prefers-reduced-motion: reduce)"), "Tier 报表缺少 reduced-motion 降级");
-assert(tier.includes("--tier-muted: #536a74"), "Tier 报表小字号文本缺少可读对比度颜色");
+assert(tier.includes("--tier-muted: light-dark(#536a74, #a5b4c8)"), "Tier 报表小字号文本缺少深浅主题对比度颜色");
 assert(!tier.includes("#71828b"), "Tier 报表仍使用对比度不足的旧灰色");
 assert(tierPage.includes("'is-selected': tier.selectedKeys.value.has(row.key)"), "Tier Sheet Records 缺少选中行视觉反馈钩子");
 

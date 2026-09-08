@@ -1,10 +1,10 @@
 .oi-modern-page[data-page="offer-list-tracker"] {
   --tracker-blue: #1769d2;
   --tracker-blue-dark: #0c4fa8;
-  --tracker-ink: #142b3b;
-  --tracker-muted: #6a7e8c;
-  --tracker-line: #dce5ea;
-  --tracker-soft: #f5f8fa;
+  --tracker-ink: light-dark(#142b3b, #e2eaf6);
+  --tracker-muted: light-dark(#6a7e8c, #a5b4c8);
+  --tracker-line: light-dark(#dce5ea, #40526b);
+  --tracker-soft: light-dark(#f5f8fa, #1a2638);
   box-sizing: border-box;
   color: var(--tracker-ink);
   display: grid;
@@ -58,7 +58,7 @@
 
 .offer-tracker-modern-eyebrow,
 .offer-tracker-eyebrow {
-  color: var(--tracker-blue);
+  color: light-dark(var(--tracker-blue), #94baff);
   display: block;
   font-size: 10px;
   font-weight: 800;
@@ -106,8 +106,8 @@
   min-height: 38px;
   border: 1px solid var(--tracker-line);
   border-radius: 8px;
-  background: #fff;
-  color: #294454;
+  background: light-dark(#fff, #1a2638);
+  color: light-dark(#294454, #e2eaf6);
   cursor: pointer;
   padding: 0 13px;
   font: 700 12px/1 "Plus Jakarta Sans", sans-serif;
@@ -140,8 +140,8 @@
 .offer-tracker-filter-actions button:first-child:hover:not(:disabled),
 .offer-tracker-rule-actions button:first-child:hover:not(:disabled),
 .offer-tracker-pagination button:hover:not(:disabled) {
-  border-color: #b8cbd6;
-  background: #f8fbfd;
+  border-color: light-dark(#b8cbd6, #40526b);
+  background: light-dark(#f8fbfd, #1a2638);
 }
 
 .offer-tracker-primary-button:hover:not(:disabled),
@@ -178,9 +178,9 @@
   display: grid;
   gap: 10px;
   width: 292px;
-  border: 1px solid #d6e1e7;
+  border: 1px solid light-dark(#d6e1e7, #40526b);
   border-radius: 9px;
-  background: #fff;
+  background: light-dark(#fff, #1a2638);
   padding: 13px;
   box-shadow: 0 22px 55px rgba(20, 43, 59, .18);
 }
@@ -201,8 +201,8 @@
   min-height: 31px;
   border: 1px solid var(--tracker-line);
   border-radius: 7px;
-  background: #fff;
-  color: #36505e;
+  background: light-dark(#fff, #1a2638);
+  color: light-dark(#36505e, #e2eaf6);
   padding: 0 9px;
   overflow: hidden;
   text-align: left;
@@ -213,8 +213,8 @@
 
 .offer-tracker-saved-view-empty {
   border-radius: 7px;
-  background: #f6f8fa;
-  color: #82939c;
+  background: light-dark(#f6f8fa, #1a2638);
+  color: light-dark(#82939c, #a5b4c8);
   padding: 10px;
   font-size: 9px;
 }
@@ -228,10 +228,10 @@
 .offer-tracker-saved-view-popover input {
   min-width: 0;
   height: 33px;
-  border: 1px solid #d5e0e6;
+  border: 1px solid light-dark(#d5e0e6, #40526b);
   border-radius: 7px;
-  background: #fbfcfd;
-  color: #203b4b;
+  background: light-dark(#fbfcfd, #1a2638);
+  color: light-dark(#203b4b, #e2eaf6);
   padding: 0 9px;
   font-size: 10px;
 }
@@ -254,9 +254,9 @@
   display: grid;
   gap: 8px;
   width: 292px;
-  border: 1px solid #d6e1e7;
+  border: 1px solid light-dark(#d6e1e7, #40526b);
   border-radius: 9px;
-  background: #fff;
+  background: light-dark(#fff, #1a2638);
   padding: 13px;
   box-shadow: 0 22px 55px rgba(20, 43, 59, .18);
 }
@@ -278,7 +278,7 @@
 .offer-tracker-popover-header small {
   display: block;
   margin-top: 3px;
-  color: #82939c;
+  color: light-dark(#82939c, #a5b4c8);
   font-size: 9px;
   font-weight: 500;
 }
@@ -289,8 +289,8 @@
   min-height: 25px;
   border: 0;
   border-radius: 6px;
-  background: #f2f5f7;
-  color: #536873;
+  background: light-dark(#f2f5f7, #1c2a3e);
+  color: light-dark(#536873, #a5b4c8);
   cursor: pointer;
   padding: 0;
   font-size: 17px;
@@ -302,7 +302,7 @@
   display: flex;
   gap: 8px;
   min-height: 32px;
-  color: #405966;
+  color: light-dark(#405966, #a5b4c8);
   font-size: 10px;
   font-weight: 700;
 }
@@ -316,9 +316,9 @@
   gap: 6px;
   margin-bottom: 4px;
   border-radius: 7px;
-  background: #f6f8fa;
+  background: light-dark(#f6f8fa, #1a2638);
   padding: 10px;
-  color: #637781;
+  color: light-dark(#637781, #a5b4c8);
   font-size: 9px;
   line-height: 1.45;
 }
@@ -327,7 +327,7 @@
   display: grid;
   gap: 6px;
   min-width: 0;
-  color: #5e7380;
+  color: light-dark(#5e7380, #a5b4c8);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: .055em;
@@ -342,10 +342,10 @@
   width: 100%;
   min-width: 0;
   height: 36px;
-  border: 1px solid #d5e0e6;
+  border: 1px solid light-dark(#d5e0e6, #40526b);
   border-radius: 7px;
-  background: #fbfcfd;
-  color: #203b4b;
+  background: light-dark(#fbfcfd, #1a2638);
+  color: light-dark(#203b4b, #e2eaf6);
   outline: 0;
   padding: 8px 10px;
   font-size: 11px;
@@ -354,7 +354,7 @@
 
 .offer-tracker-rule-field input:focus {
   border-color: var(--tracker-blue);
-  background: #fff;
+  background: light-dark(#fff, #1a2638);
   box-shadow: 0 0 0 3px rgba(23, 105, 210, .11);
 }
 
@@ -367,7 +367,7 @@
   top: 50%;
   left: 10px;
   z-index: 1;
-  color: #6b7e89;
+  color: light-dark(#6b7e89, #a5b4c8);
   transform: translateY(-50%);
 }
 
@@ -396,7 +396,7 @@
 .offer-tracker-modern-table-panel {
   border: 1px solid var(--tracker-line);
   border-radius: 9px;
-  background: #fff;
+  background: light-dark(#fff, #1a2638);
   box-shadow: 0 14px 38px rgba(35, 59, 73, .055);
 }
 
@@ -429,10 +429,10 @@
 
 .offer-tracker-live-source {
   flex: 0 0 auto;
-  border: 1px solid #cae2d8;
+  border: 1px solid light-dark(#cae2d8, #40526b);
   border-radius: 999px;
-  background: #eff9f5;
-  color: #14735b;
+  background: light-dark(#eff9f5, #1c2c3e);
+  color: light-dark(#14735b, #95c0b5);
   padding: 5px 9px;
   font-size: 9px;
   font-weight: 800;
@@ -453,7 +453,7 @@
   display: grid;
   gap: 6px;
   min-width: 0;
-  color: #5e7380;
+  color: light-dark(#5e7380, #a5b4c8);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: .055em;
@@ -479,10 +479,10 @@
   width: 100%;
   min-width: 0;
   height: 36px;
-  border: 1px solid #d5e0e6;
+  border: 1px solid light-dark(#d5e0e6, #40526b);
   border-radius: 7px;
-  background: #fbfcfd;
-  color: #203b4b;
+  background: light-dark(#fbfcfd, #1a2638);
+  color: light-dark(#203b4b, #e2eaf6);
   outline: 0;
   padding: 0 10px;
   font: 650 11px/1 "Plus Jakarta Sans", sans-serif;
@@ -511,7 +511,7 @@
 
 .offer-tracker-network-toggle b {
   flex: 0 0 auto;
-  color: #607988;
+  color: light-dark(#607988, #a5b4c8);
   font-size: 14px;
   font-weight: 700;
 }
@@ -525,9 +525,9 @@
   display: grid;
   max-height: 240px;
   overflow-y: auto;
-  border: 1px solid #c8d8e1;
+  border: 1px solid light-dark(#c8d8e1, #40526b);
   border-radius: 8px;
-  background: #fff;
+  background: light-dark(#fff, #1a2638);
   box-shadow: 0 14px 30px rgba(26, 54, 71, .16);
   padding: 5px;
 }
@@ -538,7 +538,7 @@
   gap: 8px;
   min-width: 0;
   border-radius: 6px;
-  color: #294454;
+  color: light-dark(#294454, #e2eaf6);
   cursor: pointer;
   padding: 7px 8px;
   font-size: 11px;
@@ -548,15 +548,15 @@
 }
 
 .offer-tracker-network-option:hover {
-  background: #f1f6fd;
+  background: light-dark(#f1f6fd, #1c2b3f);
 }
 
 .offer-tracker-network-option--all {
   margin-bottom: 2px;
-  border-bottom: 1px solid #e7edf0;
+  border-bottom: 1px solid light-dark(#e7edf0, #40526b);
   border-radius: 6px 6px 2px 2px;
   padding-bottom: 8px;
-  color: var(--tracker-blue-dark);
+  color: light-dark(var(--tracker-blue-dark), #94baff);
   font-weight: 750;
 }
 
@@ -593,7 +593,7 @@
 
 .offer-tracker-range-group small {
   min-height: 12px;
-  color: #82939d;
+  color: light-dark(#82939d, #a5b4c8);
   font-size: 9px;
   font-weight: 650;
   letter-spacing: 0;
@@ -609,7 +609,7 @@
   min-height: 38px;
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid #e7edf0;
+  border-top: 1px solid light-dark(#e7edf0, #40526b);
 }
 
 .offer-tracker-filter-chips {
@@ -621,10 +621,10 @@
 }
 
 .offer-tracker-filter-chips > span {
-  border: 1px solid #d7e5f7;
+  border: 1px solid light-dark(#d7e5f7, #40526b);
   border-radius: 999px;
-  background: #f1f6fd;
-  color: #2d5f99;
+  background: light-dark(#f1f6fd, #1c2b3f);
+  color: light-dark(#2d5f99, #a1b7d1);
   padding: 5px 9px;
   font-size: 9px;
   font-weight: 750;
@@ -643,8 +643,8 @@
 }
 
 .offer-tracker-modern-notice.error {
-  background: #fff0f1;
-  color: #a23f4d;
+  background: light-dark(#fff0f1, #1e2a3d);
+  color: light-dark(#a23f4d, #d5a9af);
 }
 
 .offer-tracker-kpis,
@@ -664,7 +664,7 @@
   min-height: 74px;
   border: 1px solid var(--tracker-line);
   border-radius: 8px;
-  background: #fff;
+  background: light-dark(#fff, #1a2638);
   padding: 12px 14px;
   overflow: hidden;
 }
@@ -683,8 +683,8 @@
   width: 34px;
   height: 34px;
   border-radius: 8px;
-  background: var(--kpi-soft, #eef5fd);
-  color: var(--kpi-accent, var(--tracker-blue));
+  background: var(--kpi-soft, light-dark(#eef5fd, #1c2b3f));
+  color: var(--kpi-accent, light-dark(var(--tracker-blue), #94baff));
   font-size: 15px;
   font-weight: 800;
 }
@@ -695,7 +695,7 @@
 }
 
 .offer-tracker-kpi small {
-  color: #748894;
+  color: light-dark(#748894, #a5b4c8);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: .04em;
@@ -711,7 +711,7 @@
 }
 
 .offer-tracker-kpi div > span {
-  color: #8998a1;
+  color: light-dark(#8998a1, #a5b4c8);
   font-size: 8px;
   margin-top: 4px;
 }
@@ -740,15 +740,15 @@
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: #748691;
+  color: light-dark(#748691, #a5b4c8);
   cursor: pointer;
   padding: 0 12px;
   font: 750 11px/1 "Plus Jakarta Sans", sans-serif;
 }
 
 .offer-tracker-view-tabs button.active {
-  background: #eaf2fc;
-  color: var(--tracker-blue-dark);
+  background: light-dark(#eaf2fc, #1c2b40);
+  color: light-dark(var(--tracker-blue-dark), #94baff);
 }
 
 .offer-tracker-table-actions {
@@ -788,8 +788,8 @@
   min-width: 20px;
   height: 20px;
   border-radius: 999px;
-  background: #e7f0fc;
-  color: var(--tracker-blue-dark);
+  background: light-dark(#e7f0fc, #1c2b40);
+  color: light-dark(var(--tracker-blue-dark), #94baff);
   padding: 0 5px;
   font-size: 8px;
 }
@@ -805,14 +805,14 @@
   width: 100%;
   min-width: 990px;
   border-collapse: collapse;
-  color: #2c4553;
+  color: light-dark(#2c4553, #e2eaf6);
   font-size: 12px;
   line-height: 1.45;
 }
 
 .offer-tracker-table th,
 .offer-tracker-table td {
-  border-bottom: 1px solid #e5ebee;
+  border-bottom: 1px solid light-dark(#e5ebee, #40526b);
   padding: 12px;
   text-align: left;
   vertical-align: middle;
@@ -822,8 +822,8 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  background: #f7f9fa;
-  color: #627782;
+  background: light-dark(#f7f9fa, #1a2638);
+  color: light-dark(#627782, #a5b4c8);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: .055em;
@@ -838,7 +838,7 @@
 
 .offer-tracker-table tbody tr:hover,
 .offer-tracker-table tbody tr.is-selected {
-  background: #f1f6fd;
+  background: light-dark(#f1f6fd, #1c2b3f);
 }
 
 .offer-tracker-priority-cell {
@@ -867,18 +867,18 @@
 }
 
 .offer-tracker-priority-badge.high {
-  background: #fff2d8;
-  color: #ae6b00;
+  background: light-dark(#fff2d8, #222e3d);
+  color: light-dark(#ae6b00, #dbbc8c);
 }
 
 .offer-tracker-priority-badge.recommended {
-  background: #e9f2fd;
-  color: #1e67b4;
+  background: light-dark(#e9f2fd, #1c2b40);
+  color: light-dark(#1e67b4, #9abbdd);
 }
 
 .offer-tracker-priority-badge.low-aov {
-  background: #edf7f2;
-  color: #247359;
+  background: light-dark(#edf7f2, #1c2c3e);
+  color: light-dark(#247359, #a5b4c8);
 }
 
 .offer-tracker-merchant-cell strong,
@@ -889,24 +889,24 @@
 .offer-tracker-merchant-cell strong {
   max-width: 180px;
   overflow: hidden;
-  color: #183747;
+  color: light-dark(#183747, #e2eaf6);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .offer-tracker-merchant-cell span {
-  color: #87969e;
+  color: light-dark(#87969e, #a5b4c8);
   font-size: 10px;
   margin-top: 3px;
 }
 
 .offer-tracker-tier-badge {
   display: inline-block;
-  border: 1px solid #d6e2ea;
+  border: 1px solid light-dark(#d6e2ea, #40526b);
   border-radius: 5px;
-  background: #f8fafb;
-  color: #516873;
+  background: light-dark(#f8fafb, #1a2638);
+  color: light-dark(#516873, #a5b4c8);
   padding: 5px 8px;
   font-size: 10px;
   font-weight: 800;
@@ -914,7 +914,7 @@
 }
 
 .offer-tracker-number-cell {
-  color: #1f4051;
+  color: light-dark(#1f4051, #e2eaf6);
   font-weight: 750;
   white-space: nowrap;
 }
@@ -935,26 +935,26 @@
 .offer-tracker-aov-type.actual,
 .offer-tracker-bb-policy.open {
   background: rgba(23, 123, 115, .11);
-  color: #0b655f;
+  color: light-dark(#0b655f, #91bab7);
 }
 
 .offer-tracker-aov-type.estimated,
 .offer-tracker-bb-policy.mind {
   background: rgba(181, 130, 24, .14);
-  color: #8a5d00;
+  color: light-dark(#8a5d00, #cab68c);
 }
 
 .offer-tracker-aov-type.unavailable,
 .offer-tracker-bb-policy.unknown {
-  background: #eef2f4;
-  color: #60747f;
+  background: light-dark(#eef2f4, #1c2b3e);
+  color: light-dark(#60747f, #a5b4c8);
 }
 
 .offer-tracker-category-cell,
 .offer-tracker-recommendation-cell {
   display: inline-block;
   max-width: 235px;
-  color: #5e737f;
+  color: light-dark(#5e737f, #a5b4c8);
   font-size: 12px;
   line-height: 1.5;
   white-space: normal;
@@ -969,15 +969,15 @@
 
 .offer-tracker-asin {
   border-radius: 4px;
-  background: #f0f3f5;
-  color: #526975;
+  background: light-dark(#f0f3f5, #1c2a3e);
+  color: light-dark(#526975, #a5b4c8);
   padding: 4px 6px;
   font: 700 10px/1.2 "Plus Jakarta Sans", sans-serif;
 }
 
 .offer-tracker-table [data-empty-state] td {
   height: 260px;
-  color: #7c8f99;
+  color: light-dark(#7c8f99, #a5b4c8);
   text-align: center;
 }
 
@@ -992,14 +992,14 @@
 }
 
 .offer-tracker-table-footer > div:first-child {
-  color: #788b95;
+  color: light-dark(#788b95, #a5b4c8);
   font-size: 9px;
 }
 
 .offer-tracker-table-footer > div:first-child small {
   display: inline-block;
   margin-left: 12px;
-  color: #5f747f;
+  color: light-dark(#5f747f, #a5b4c8);
 }
 
 .offer-tracker-table-footer-actions {
@@ -1026,13 +1026,13 @@
   height: 30px;
   min-height: 30px;
   padding: 0;
-  color: #4b6471;
+  color: light-dark(#4b6471, #a5b4c8);
   font-size: 17px;
 }
 
 .offer-tracker-pagination span {
   min-width: 58px;
-  color: #5f747f;
+  color: light-dark(#5f747f, #a5b4c8);
   text-align: center;
   font-size: 9px;
   font-weight: 750;
