@@ -54,7 +54,8 @@ describe("Standalone page presentation", () => {
     expect(getComputedStyle(page.get(".chat-mode-toggle").element).display).toBe("flex");
     expect(getComputedStyle(page.get(".report-mode-guide").element).display).toBe("flex");
     expect(getComputedStyle(page.get(".chat-input").element).display).toBe("grid");
-    expect(getComputedStyle(page.element).minHeight).toBe("620px");
+    expect(parseFloat(getComputedStyle(page.element).minHeight)).toBe(0);
+    expect(getComputedStyle(page.element).height).toBe("calc(100dvh - 48px)");
     expect(getComputedStyle(page.get(".insight-panel").element).borderRadius).not.toBe("");
   });
 
