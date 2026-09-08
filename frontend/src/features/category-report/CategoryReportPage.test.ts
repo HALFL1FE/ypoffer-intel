@@ -91,4 +91,15 @@ describe("CategoryReportPage", () => {
     expect(wrapper.find('[data-category-action="toggle-expanded"]').exists()).toBe(true);
   });
 
+  it("presents category records with a publishers-style table toolbar", () => {
+    const wrapper = mount(CategoryReportPage, {
+      props: { language: "en", reportData: report, autoLoad: false }
+    });
+
+    const toolbar = wrapper.find(".dashboard-category-table-toolbar");
+    expect(toolbar.exists()).toBe(true);
+    expect(toolbar.get("h3").text()).toBe("Category Records");
+    expect(toolbar.get("[data-category-table-count]").text()).toContain("2");
+  });
+
 });
