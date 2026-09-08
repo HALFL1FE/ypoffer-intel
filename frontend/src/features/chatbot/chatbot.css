@@ -15,9 +15,8 @@
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  /* The standalone host no longer has the former chatbot-modern-root wrapper. */
-  min-height: 620px;
-  height: clamp(620px, calc(100dvh - 150px), 900px);
+  /* Match the shell's 24px top and bottom insets without capping tall screens. */
+  height: calc(100dvh - 48px);
   position: relative;
   color: var(--ink);
 }

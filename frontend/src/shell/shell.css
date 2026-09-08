@@ -188,6 +188,10 @@ body[data-oi-theme="dark"] .modern-application {
 .modern-application-page > [data-modern-root] { display: flex; flex: 1 1 auto; width: 100%; }
 .modern-application .agent-workspace { height: calc(100dvh - 48px); max-height: none; }
 .modern-application-page:has(.agent-workspace) { padding-bottom: 24px; }
+
+@media (min-width: 1121px) {
+  .modern-application-page:has(.chatbot-modern-page) { padding-bottom: 24px; }
+}
 .modern-shell-mobile-bar, .modern-shell-backdrop { display: none; }
 .modern-shell :is(button, a, input, select, textarea):focus-visible { outline: 3px solid var(--modern-shell-accent); outline-offset: 3px; }
 @keyframes modern-shell-arrive { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
