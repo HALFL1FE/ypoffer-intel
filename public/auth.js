@@ -1,10 +1,20 @@
 (function () {
-  const APP_SCRIPT = "./app.js?v=20260827-google-ads-chart-pan";
+  const MODERN_SESSION_STORAGE_KEYS = [
+    "oi_agent_memory_v1",
+    "oi_agent_session_v1",
+    "oi_chat_session_v1",
+    "oiChatbotQuestionSessionId.v1"
+  ];
+  const MODERN_APP_SCRIPT = "./assets/modern/oi-modern.js?v=20260908-chatbot-review";
   const AUTH_READY_CLASS = "auth-ready";
   const reduceMotionQuery = "(prefers-reduced-motion: reduce)";
 
   const authShell = document.getElementById("authShell");
   const appShell = document.getElementById("appShell");
+  const modernAppRoot = document.getElementById("modernAppRoot");
+  const modernAppError = document.getElementById("modernAppError");
+  const modernAppErrorMessage = document.getElementById("modernAppErrorMessage");
+  const modernAppErrorRetry = document.getElementById("modernAppErrorRetry");
   const form = document.getElementById("authForm");
   const username = document.getElementById("authUsername");
   const password = document.getElementById("authPassword");
@@ -16,6 +26,7 @@
   const loadingTrack = document.getElementById("skeletonLoadingTrack");
   const loadingValue = document.getElementById("skeletonLoadingValue");
   const loadingNote = document.getElementById("skeletonLoadingNote");
+  let authRefreshInFlight = false;
 
   function createLoadingProgress() {
     let current = 8;
@@ -167,6 +178,9 @@
       credentials: "same-origin",
       ...(options || {})
     });
+    if ((response.status === 401 || response.status === 403) && typeof window.dispatchEvent === "function") {
+      window.dispatchEvent(new CustomEvent("oi-auth-failure", { detail: { status: response.status } }));
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.ok === false) {
       const error = new Error(payload.error || `Request failed with ${response.status}`);
@@ -187,11 +201,129 @@
     });
   }
 
+  function clearModernSessionState() {
+    try {
+      const storage = window.localStorage;
+      MODERN_SESSION_STORAGE_KEYS.forEach((key) => storage.removeItem(key));
+    } catch (_error) {
+      // A blocked localStorage must not prevent the server-side logout.
+    }
+  }
+
+  function setAuthUser(value) {
+    const access = window.OI_PAGE_ACCESS;
+    const user = access && typeof access.normalizeUser === "function"
+      ? access.normalizeUser(value)
+      : null;
+    const initialPage = user && typeof access.defaultPageForLevel === "function"
+      ? access.defaultPageForLevel(user.level)
+      : null;
+    if (!user || !initialPage) throw new Error("Authenticated user page access is unavailable");
+    window.__OI_AUTH_USER = user;
+    window.__OI_INITIAL_PAGE = initialPage;
+    return user;
+  }
+
+  function currentAuthUser() {
+    const access = window.OI_PAGE_ACCESS;
+    if (!access || typeof access.normalizeUser !== "function") return null;
+    return access.normalizeUser(window.__OI_AUTH_USER);
+  }
+
+  function showLoginShell() {
+    window.__OI_AUTH_USER = null;
+    window.__OI_INITIAL_PAGE = null;
+    if (modernAppRoot) modernAppRoot.replaceChildren();
+    if (modernAppError) modernAppError.classList.add("hidden");
+    if (appShell) appShell.classList.add("hidden");
+    if (authShell) authShell.classList.remove("hidden");
+    document.body.classList.add("auth-pending");
+    document.body.classList.remove("modern-startup-error", "modern-only");
+    setStatus("", "");
+    username?.focus?.();
+  }
+
+  function showModernError(error) {
+    const detail = error && error.message ? String(error.message).slice(0, 220) : "Unknown startup error";
+    if (modernAppErrorMessage) {
+      modernAppErrorMessage.textContent = `The modern application could not start (${detail}). Refresh the page or contact support.`;
+    }
+    if (modernAppError) modernAppError.classList.remove("hidden");
+    if (appShell) appShell.classList.add("hidden");
+    document.body.classList.remove("app-loading");
+    document.body.classList.add("modern-startup-error");
+    modernAppErrorRetry?.focus?.();
+  }
+
+  async function loadModernApp() {
+    try {
+      await loadScript(MODERN_APP_SCRIPT);
+      if (!window.OI_MODERN_APP || typeof window.OI_MODERN_APP.bootstrap !== "function") {
+        throw new Error("Modern frontend bootstrap API is unavailable");
+      }
+      let language = "zh";
+      try {
+        language = localStorage.getItem("offerLanguage") === "en" ? "en" : "zh";
+      } catch (_error) {
+        language = "zh";
+      }
+      const user = currentAuthUser();
+      if (!user) throw new Error("Authenticated user is unavailable");
+      const access = window.OI_PAGE_ACCESS;
+      const initialPage = access && typeof access.defaultPageForLevel === "function"
+        ? access.defaultPageForLevel(user.level)
+        : null;
+      if (!initialPage) throw new Error("Page access runtime is unavailable");
+      window.OI_MODERN_APP.bootstrap({
+        user,
+        chatbotData: window.CHATBOT_DATA || {},
+        sheetReportData: window.SHEET_REPORT_DATA || {},
+        productKeywords: window.PRODUCT_KEYWORDS || {},
+        language,
+        llmEnabled: window.__OI_LLM_ENABLED !== false,
+        agentEnabled: window.__OI_AGENT_ENABLED !== false
+      });
+      if (!modernAppRoot || typeof window.OI_MODERN_APP.mountApplication !== "function") {
+        throw new Error("Modern application root is unavailable");
+      }
+      if (!window.OI_MODERN_APP.mountApplication(modernAppRoot, initialPage)) {
+        throw new Error("Modern application mount failed");
+      }
+      document.body.classList.add("modern-only");
+      loadingProgress.finish("Dashboard ready", "Modern workspace is ready");
+      return true;
+    } catch (error) {
+      console.warn("Modern frontend unavailable; showing the startup error state.", error);
+      showModernError(error);
+      return false;
+    }
+  }
+
   let _dataLoading = false;
 
   async function loadDashboardAssets() {
     if (_dataLoading) return;  // already loading
     _dataLoading = true;
+    const user = currentAuthUser();
+    if (!user) {
+      _dataLoading = false;
+      throw new Error("Authenticated user is unavailable");
+    }
+    window.__OFFER_KEYWORDS_LOADED = false;
+    if (user.level === 2) {
+      window.CHATBOT_DATA = { summary: {}, offers: [], paymentRecords: [] };
+      window.SHEET_REPORT_DATA = { sheets: [], tierSheets: [] };
+      window.PRODUCT_KEYWORDS = { merchants: [] };
+      loadingProgress.set(78, "Opening Google Ads workspace…", "Offer data is not required for this access level");
+      setStatus("", "");
+      loadingProgress.driftTo(94, "Building Google Ads workspace…", "Applying your access level");
+      try {
+        await loadModernApp();
+      } finally {
+        _dataLoading = false;
+      }
+      return;
+    }
     setStatus("Loading offer data from database", "muted");
     loadingProgress.set(12, "Connecting to offer database…", "Preparing secure access");
     loadingProgress.driftTo(68, "Loading offer records…", "Merchant, performance, and payment data");
@@ -216,6 +348,8 @@
       };
 
       window.SHEET_REPORT_DATA = {
+        startDate: offersResp.startDate || "",
+        endDate: offersResp.endDate || "",
         sheets: offersResp.sheets || [],
         tierSheets: ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "BLACK TIER"]
       };
@@ -224,6 +358,10 @@
       const offerCount = window.CHATBOT_DATA.offers.length.toLocaleString();
       loadingProgress.set(78, "Offer data received", `${offerCount} offers ready to index`);
     } catch (_err) {
+      if (authRefreshInFlight || !currentAuthUser()) {
+        _dataLoading = false;
+        return;
+      }
       // Fallback: empty data
       window.CHATBOT_DATA = { summary: {}, offers: [] };
       window.SHEET_REPORT_DATA = { sheets: [], tierSheets: [] };
@@ -232,7 +370,11 @@
     }
     setStatus("", "");
     loadingProgress.driftTo(94, "Building dashboard…", "Applying filters and preparing report views");
-    await loadScript(APP_SCRIPT);
+    try {
+      await loadModernApp();
+    } finally {
+      _dataLoading = false;
+    }
 
     // Background: load keyword data after dashboard renders
     // (not awaited — non-blocking)
@@ -242,14 +384,15 @@
   /** Lazy-load product keyword data for chatbot keyword search. */
   async function loadOfferKeywords() {
     if (window.__OFFER_KEYWORDS_LOADED) return;
+    const user = currentAuthUser();
+    if (!user || user.level === 2) return;
     try {
       const kwResp = await fetchJson("/api/ui/db/keywords");
+      const currentUser = currentAuthUser();
+      if (!currentUser || currentUser.id !== user.id || currentUser.level === 2) return;
       window.PRODUCT_KEYWORDS = kwResp;
+      window.OI_MODERN_APP?.updateProductKeywords(kwResp);
       window.__OFFER_KEYWORDS_LOADED = true;
-      // Notify app.js to merge keyword data into offers
-      if (typeof window.__onOfferKeywordsLoaded === "function") {
-        window.__onOfferKeywordsLoaded(kwResp);
-      }
     } catch (_err) {
       // Keywords unavailable — attempt to be non-fatal;
       // chatbot keyword search will degrade gracefully.
@@ -257,7 +400,7 @@
   }
 
   function bindLogout() {
-    const logout = document.getElementById("logoutButton");
+    const logout = document.getElementById("modernLogoutButton") || document.getElementById("logoutButton");
     if (!logout) return;
     logout.addEventListener("click", async () => {
       logout.disabled = true;
@@ -266,7 +409,7 @@
       } catch (_error) {
         // A failed logout call still gets a clean local reset through reload.
       }
-      if (window.AGENT_MEMORY_STATE) window.AGENT_MEMORY_STATE.clear(localStorage);
+      clearModernSessionState();
       window.location.reload();
     });
   }
@@ -285,11 +428,41 @@
     bindLogout();
   }
 
+  async function handleAuthFailure(event) {
+    const failureStatus = event?.detail?.status;
+    if (failureStatus !== 401 && failureStatus !== 403) return;
+    if (authRefreshInFlight) return;
+    authRefreshInFlight = true;
+    try {
+      if (failureStatus === 401) {
+        clearModernSessionState();
+        showLoginShell();
+        return;
+      }
+      if (!currentAuthUser()) return;
+      const session = await fetchJson("/api/auth/session");
+      setAuthUser(session.user);
+      window.location.reload();
+    } catch (_error) {
+      clearModernSessionState();
+      showLoginShell();
+    } finally {
+      authRefreshInFlight = false;
+    }
+  }
+
   async function checkSession() {
     try {
       const session = await fetchJson("/api/auth/session");
+      setAuthUser(session.user);
       window.__OI_LLM_ENABLED = session.llmEnabled !== false;
       window.__OI_AGENT_ENABLED = session.agentEnabled !== false;
+      window.OI_COPILOTKIT_RUNTIME = session.agentRuntime || {
+        enabled: false,
+        endpoint: "/api/copilotkit",
+        authority: "python-registry",
+        fallback: "modern"
+      };
       await unlockDashboard();
     } catch (error) {
       if (error.status === 503) {
@@ -319,6 +492,13 @@
       });
       window.__OI_LLM_ENABLED = loginResult.llmEnabled !== false;
       window.__OI_AGENT_ENABLED = loginResult.agentEnabled !== false;
+      setAuthUser(loginResult.user);
+      window.OI_COPILOTKIT_RUNTIME = loginResult.agentRuntime || {
+        enabled: false,
+        endpoint: "/api/copilotkit",
+        authority: "python-registry",
+        fallback: "modern"
+      };
       if (password) password.value = "";
       await unlockDashboard();
     } catch (error) {
@@ -331,6 +511,8 @@
   }
 
   async function initAuth() {
+    modernAppErrorRetry?.addEventListener("click", () => window.location.reload());
+    window.addEventListener("oi-auth-failure", handleAuthFailure);
     if (form) form.addEventListener("submit", handleSubmit);
     await waitForGsap(700);
     animateIntro();
