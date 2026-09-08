@@ -18,6 +18,84 @@ const offers = [
 ];
 
 describe("createChatbotSession", () => {
+  it("routes by the classifier and applies category/tier parameters over conflicting local tokens", async () => {
+    const classify = vi.fn(async () => ({ intent: "category", params: { category: ["Electronics"], tier: ["Tier 1"] } }));
+    const session = createChatbotSession({ offers, language: "en", classify, enableQuestionLogging: false });
+    const result = await session.submit("Show devices in Tier 2");
+    expect(result).toMatchObject({ ok: true, intent: "category" });
+    expect(result.report).toMatchObject({ query: "Show devices in Tier 2", rows: offers, category: "Electronics", tier: "Tier 1" });
+  });
+
+  it("uses the classified merchant ID even when the prompt names a different merchant", async () => {
+    const other = { ...offers[0], merchantId: "888888", brand: "Other", merchantName: "Other" };
+    const session = createChatbotSession({
+      offers: [...offers, other], language: "en", enableQuestionLogging: false,
+      classify: async () => ({ intent: "merchant", params: { merchantId: "888888" } })
+    });
+    expect((await session.submit("Tapo")).report?.rows).toEqual([other]);
+  });
+
+  it("applies classified payment filters without searching the original natural-language sentence as a name", async () => {
+    const record = { merchantName: "Tapo", month: "2026-08", status: "unpaid", revenue: 40 };
+    const session = createChatbotSession({
+      offers, paymentRecords: [record, { ...record, status: "paid" }, { ...record, merchantName: "Other" }],
+      language: "en", enableQuestionLogging: false,
+      classify: async () => ({ intent: "payment", params: { merchantName: "Tapo", paymentStatus: "unpaid", month: "August" } })
+    });
+    const result = await session.submit("What do they owe for last month?");
+    expect(result).toMatchObject({ ok: true, intent: "payment" });
+    expect(result.report?.rows).toEqual([record]);
+  });
+
+  it("uses classified analysis targets and never substitutes unrelated merchants for an unknown target", async () => {
+    const analyze = vi.fn(async (_summary: Readonly<Record<string, unknown>>) => "Analysis result");
+    const classify = vi.fn(async () => ({ intent: "analysis", params: { analysisType: "merchant", analysisTarget: "Tapo" } }));
+    const session = createChatbotSession({ offers, language: "en", enableQuestionLogging: false, classify, analyze });
+    expect((await session.submit("How is it doing?")).intent).toBe("analysis");
+    expect(analyze.mock.calls[0]?.[0]).toMatchObject({ rows: offers });
+    classify.mockResolvedValue({ intent: "analysis", params: { analysisType: "merchant", analysisTarget: "Absent" } });
+    expect((await session.submit("How about another?")).report?.rows).toEqual([]);
+  });
+
+  it.each([null, { intent: "publisher", params: {} }, { intent: "category", params: [] }])("falls back to local reports for invalid classifier output %j", async (classification) => {
+    const session = createChatbotSession({ offers, language: "en", enableQuestionLogging: false, classify: async () => classification });
+    expect((await session.submit("Tapo")).report?.rows).toEqual(offers);
+  });
+
+  it("falls back when classification fails and stops before analysis if classification is cancelled", async () => {
+    const analyze = vi.fn();
+    const session = createChatbotSession({
+      offers, language: "en", enableQuestionLogging: false, analyze,
+      classify: async () => { throw new Error("offline"); }
+    });
+    expect((await session.submit("Tapo")).ok).toBe(true);
+    const controller = new AbortController();
+    const cancelled = createChatbotSession({
+      offers, language: "en", enableQuestionLogging: false, analyze, signal: controller.signal,
+      classify: async () => { controller.abort(); return { intent: "analysis", params: {} }; }
+    });
+    expect((await cancelled.submit("Tapo")).stopped).toBe(true);
+    expect(analyze).not.toHaveBeenCalled();
+  });
+
+  it("uses keywords arriving after session creation, joining by ID without changing offer metrics", async () => {
+    let keywords: unknown = { merchants: [] };
+    const session = createChatbotSession({ offers, language: "en", llmEnabled: false, enableQuestionLogging: false, getProductKeywords: () => keywords });
+    expect((await session.submit("aurora smart plug")).ok).toBe(false);
+    keywords = { merchants: [
+      { merchantId: 398679, merchantName: "Different label", productTitles: ["aurora smart plug"], productKeywords: ["nebulawifi"], salesAmount: 999 },
+      { merchantId: "000000", merchantName: "Tapo", productKeywords: ["wrongmerchant"] }
+    ] };
+    const result = await session.submit("aurora smart plug");
+    expect(result).toMatchObject({ ok: true, report: { summary: { revenue: 1200 } } });
+    expect(result.report?.rows[0]?.merchantId).toBe("398679");
+    expect((await session.submit("nebulawifi")).ok).toBe(true);
+    expect((await session.submit("wrongmerchant")).ok).toBe(false);
+    expect(offers[0]).not.toHaveProperty("productKeywords");
+    keywords = null;
+    expect((await session.submit("Tapo")).ok).toBe(true);
+  });
+
   it("uses the cached report model and exposes a structured snapshot", async () => {
     const session = createChatbotSession({ offers, language: "zh", llmEnabled: false, enableQuestionLogging: false });
 

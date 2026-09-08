@@ -19,9 +19,7 @@ const OPTIONS: readonly CommandOption[] = [
   { key: "categorytier", intent: "category", zh: "品类 + Tier", en: "Category & Tier", zhHint: "某 Tier 内的品类查询", enHint: "Category within a tier" },
   { key: "trend", intent: "analysis", zh: "趋势", en: "Trend", zhHint: "趋势分析", enHint: "Trend analysis" },
   { key: "payment", intent: "payment", zh: "付款", en: "Payment", zhHint: "付款状态", enHint: "Payment status" },
-  { key: "asin", intent: "asin", zh: "ASIN", en: "ASIN", zhHint: "ASIN 查询", enHint: "ASIN lookup" },
-  { key: "publisher", intent: "publisher", zh: "媒体", en: "Publisher", zhHint: "媒体记录查询", enHint: "Publisher records" },
-  { key: "publisherprofile", intent: "publisherprofile", zh: "媒体画像", en: "Publisher profile", zhHint: "媒体画像", enHint: "Publisher profile" }
+  { key: "asin", intent: "asin", zh: "ASIN", en: "ASIN", zhHint: "ASIN 查询", enHint: "ASIN lookup" }
 ];
 
 const props = withDefaults(defineProps<{

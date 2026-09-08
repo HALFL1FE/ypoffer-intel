@@ -7,6 +7,7 @@ import {
   searchChatbotOffers
 } from "./chatbotModel";
 import type { ChatbotIntent, ChatbotSearchOptions } from "./chatbotTypes";
+import { classificationValues, type ChatbotClassification } from "./chatbotClassification";
 type ChatbotDataSource = "cache" | "db" | "unavailable";
 
 type OfferRow = Readonly<Record<string, unknown>>;
@@ -140,27 +141,83 @@ function defaultTierVisible(row: OfferRow): boolean {
 export function buildChatbotReport(
   prompt: string,
   data: ChatbotReportData,
-  language: "zh" | "en" = "zh"
+  language: "zh" | "en" = "zh",
+  classification: ChatbotClassification | null = null
 ): ChatbotReportResult {
   const query = text(prompt);
   const offers = data.offers.slice();
-  const detected = detectChatbotIntent(query);
-  const tier = tierFromPrompt(query);
-  const category = resolveChatbotCategory(query, categoryValues(offers));
-  const merchant = resolveChatbotMerchant(query, offers);
+  const detected = classification?.intent || detectChatbotIntent(query);
+  const params = classification?.params || {};
+  const tiers = classificationValues(params.tier).map(canonicalChatbotTier);
+  const categories = classificationValues(params.category);
+  const tier = tiers[0] || tierFromPrompt(query);
+  const category = categories[0] || resolveChatbotCategory(query, categoryValues(offers));
+  const merchantQuery = classificationValues(params.merchantId)[0]
+    ? `merchant ID: ${classificationValues(params.merchantId)[0]}`
+    : classificationValues(params.merchantName)[0] || query;
+  const merchant = resolveChatbotMerchant(merchantQuery, offers);
 
   let intent: ChatbotIntent = detected;
   let rows: OfferRow[] = [];
   let status: ChatbotReportStatus = "resolved";
 
-  if (tier) {
+  if (detected === "payment" || detected === "analysis") {
+    status = "deferred";
+  } else if (classification) {
+    if (detected === "merchant") {
+      rows = merchant.matches.map((match) => match.offer);
+      status = merchant.status;
+      if (status === "not_found" && !params.merchantId && !params.merchantName) {
+        rows = searchChatbotOffers(offers, query, withOptions(query, tier)).map((match) => match.offer);
+        status = rows.length ? "resolved" : "not_found";
+      }
+    } else if (detected === "asin") {
+      const asin = classificationValues(params.asin)[0] || query;
+      rows = searchChatbotOffers(offers, asin, withOptions(query, tier))
+        .filter((match) => match.matchType === "asin").map((match) => match.offer);
+    } else {
+      const selectedTiers = tiers.length ? tiers : tier ? [tier] : [];
+      const selectedCategories = categories.length ? categories : category ? [category] : [];
+      rows = offers.filter((row) => {
+        const value = rowTier(row);
+        const tierAllowed = selectedTiers.length ? selectedTiers.includes(value)
+          : (value !== "Tier 4" || params.includeTier4 === true)
+            && (value !== "BLACK TIER" || params.includeBlack === true);
+        return tierAllowed && (!selectedCategories.length || selectedCategories.some((item) => rowMatchesCategory(row, item)));
+      });
+      if (detected === "recommendation") {
+        if (Array.isArray(params.metricFilters)) {
+          for (const filter of params.metricFilters) {
+            if (!filter || typeof filter !== "object" || typeof filter.field !== "string" || typeof filter.value !== "number") continue;
+            rows = rows.filter((row) => {
+              const value = numberValue(row, [filter.field]);
+              if (filter.operator === ">") return value > filter.value;
+              if (filter.operator === ">=") return value >= filter.value;
+              if (filter.operator === "<") return value < filter.value;
+              if (filter.operator === "<=") return value <= filter.value;
+              return true;
+            });
+          }
+        }
+        const sort = params.metricSort as { field?: unknown; direction?: unknown } | undefined;
+        const field = typeof sort?.field === "string" ? sort.field : "salesAmount";
+        const direction = sort?.direction === "asc" ? 1 : -1;
+        rows.sort((a, b) => direction * (numberValue(a, [field]) - numberValue(b, [field])));
+        if (typeof params.count === "number" && Number.isInteger(params.count) && params.count > 0) {
+          rows = rows.slice(0, params.count);
+        }
+      } else if ((detected === "category" && !selectedCategories.length) || (detected === "tier" && !selectedTiers.length)) {
+        rows = [];
+      }
+    }
+  } else if (tier) {
     intent = detected === "recommendation" ? "recommendation" : "tier";
     rows = offers.filter((row) => rowTier(row) === tier && (!category || rowMatchesCategory(row, category)));
   } else if (merchant.status !== "not_found" && (detected === "merchant" || /\bid\s*[:#]?\s*[a-z0-9_-]+/i.test(query))) {
     intent = "merchant";
     rows = merchant.matches.map((match) => match.offer);
     status = merchant.status;
-  } else if (category && detected !== "payment" && detected !== "analysis") {
+  } else if (category) {
     intent = detected === "recommendation" ? "recommendation" : "category";
     rows = offers.filter((row) => defaultTierVisible(row) && rowMatchesCategory(row, category));
   } else if (detected === "recommendation") {
@@ -169,10 +226,9 @@ export function buildChatbotReport(
   } else if (detected === "asin") {
     const matches = searchChatbotOffers(offers, query, withOptions(query, tier));
     rows = matches.map((match) => match.offer);
-  } else if (detected === "payment" || detected === "analysis") {
-    status = "deferred";
   } else {
-    status = merchant.status;
+    rows = searchChatbotOffers(offers, query, withOptions(query, tier)).map((match) => match.offer);
+    status = rows.length ? "resolved" : merchant.status;
   }
 
   if (!rows.length && status === "resolved") status = "not_found";

@@ -31,6 +31,7 @@ export interface AppBootstrapData {
 
 export interface ModernAppApi {
   bootstrap(data: AppBootstrapData): void;
+  updateProductKeywords(payload: unknown): void;
   mountApplication(element: HTMLElement, initialPage?: ModernPageName): boolean;
   mountPage(page: ModernPageName, element: HTMLElement): boolean;
   unmountPage(page: ModernPageName): void;

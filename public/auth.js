@@ -5,7 +5,7 @@
     "oi_chat_session_v1",
     "oiChatbotQuestionSessionId.v1"
   ];
-  const MODERN_APP_SCRIPT = "./assets/modern/oi-modern.js?v=20260904-m7-final";
+  const MODERN_APP_SCRIPT = "./assets/modern/oi-modern.js?v=20260908-chatbot-review";
   const AUTH_READY_CLASS = "auth-ready";
   const reduceMotionQuery = "(prefers-reduced-motion: reduce)";
 
@@ -309,6 +309,7 @@
       _dataLoading = false;
       throw new Error("Authenticated user is unavailable");
     }
+    window.__OFFER_KEYWORDS_LOADED = false;
     if (user.level === 2) {
       window.CHATBOT_DATA = { summary: {}, offers: [], paymentRecords: [] };
       window.SHEET_REPORT_DATA = { sheets: [], tierSheets: [] };
@@ -383,9 +384,14 @@
   /** Lazy-load product keyword data for chatbot keyword search. */
   async function loadOfferKeywords() {
     if (window.__OFFER_KEYWORDS_LOADED) return;
+    const user = currentAuthUser();
+    if (!user || user.level === 2) return;
     try {
       const kwResp = await fetchJson("/api/ui/db/keywords");
+      const currentUser = currentAuthUser();
+      if (!currentUser || currentUser.id !== user.id || currentUser.level === 2) return;
       window.PRODUCT_KEYWORDS = kwResp;
+      window.OI_MODERN_APP?.updateProductKeywords(kwResp);
       window.__OFFER_KEYWORDS_LOADED = true;
     } catch (_err) {
       // Keywords unavailable — attempt to be non-fatal;

@@ -4,6 +4,8 @@
 
 > **M7 当前实现说明：** 本文中带有 Legacy、`public/app.js`、旧辅助脚本或 `frontend/src/legacy/` 的章节是迁移历史与行为来源记录，不再代表当前文件路径。生产前端现由 `frontend/src/runtime/modernApp.ts`、`frontend/src/entry.ts`、`frontend/src/features/chatbot/` 与 `frontend/src/features/agent/` 承载；认证入口仅为 `public/auth.js`。旧运行时、旧页面 DOM 和运行时回退开关已删除，回滚使用上一份可部署构建。
 
+> **2026-09-08 PR #189 审查修复：** Vue Report Mode 现在消费 `/api/chat/classify` 返回的有效 `intent` 和查询参数，分类失败或无效时使用本地规则；分类期间停止会阻止后续分析。`public/auth.js` 延迟获取关键词后调用 `OI_MODERN_APP.updateProductKeywords()`，已创建的 Chatbot session 在查询时读取最新快照，并仅按 Merchant ID 合并产品标题、关键词及 ASIN，不覆盖指标或清空会话。Chatbot 的媒体记录和媒体画像命令尚未接入完整数据通路，已从默认菜单隐藏；独立 Publishers 页面不受影响。此说明优先于下文历史迁移章节中的功能对齐描述。
+
 ## 1. 概述
 
 > Agent 请求上限与工具批处理修复（2026-08-24）：规划请求继续使用 64KB；本地和 Vercel 综合流入口实际读取上限统一为 128KB。工具规划结果按每批最多 4 个执行，总预算 6 个；超过总预算时返回 partial、omittedTargets 等元数据，并在综合回答和执行时间线中明确提示结果不完整。

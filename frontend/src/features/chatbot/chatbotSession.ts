@@ -7,6 +7,8 @@ import {
   type ChatbotReportResult
 } from "./chatbotReportModel";
 import { detectChatbotIntent, resolveChatbotMerchant } from "./chatbotModel";
+import { mergeChatbotKeywords } from "./chatbotKeywords";
+import { classificationValues, normalizeChatbotClassification, type ChatbotClassification } from "./chatbotClassification";
 import { streamChatbotReply } from "./useChatbotChat";
 import { createDeepWindowStore, type DeepWindowStore } from "./deepWindowStore";
 import type {
@@ -31,6 +33,7 @@ type Row = Readonly<Record<string, unknown>>;
 export interface ChatbotSessionOptions {
   readonly offers: readonly Row[];
   readonly paymentRecords?: readonly Row[];
+  readonly getProductKeywords?: () => unknown;
   readonly language: UiLanguage;
   readonly llmEnabled?: boolean;
   readonly enableQuestionLogging?: boolean;
@@ -187,8 +190,34 @@ function paymentRowMatches(row: Row, prompt: string): boolean {
   return !name || merchant.toLowerCase().includes(name);
 }
 
-function paymentReport(prompt: string, records: readonly Row[], language: UiLanguage): ChatbotReportViewResult {
-  const rows = records.filter((row) => paymentRowMatches(row, prompt));
+function paymentReport(prompt: string, records: readonly Row[], language: UiLanguage, classification: ChatbotClassification | null = null): ChatbotReportViewResult {
+  const params = classification?.params;
+  const rows = records.filter((row) => {
+    if (!params) return paymentRowMatches(row, prompt);
+    const name = classificationValues(params.merchantName)[0]?.toLowerCase();
+    const status = classificationValues(params.paymentStatus)[0]?.toLowerCase() || paymentStatus(prompt);
+    const month = classificationValues(params.month)[0];
+    if (name && !text(row.merchant || row.merchantName || row.brand).toLowerCase().includes(name)) return false;
+    if (status && text(row.status || row.paymentStatus).toLowerCase() !== status) return false;
+    const rowMonth = text(row.month || row.monthKey || row.reportMonth);
+    const parsedMonth = paymentMonth(month || prompt);
+    if (parsedMonth && rowMonth !== parsedMonth) return false;
+    if (month && !parsedMonth) {
+      const monthNumber = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"].indexOf(month.toLowerCase()) + 1;
+      if (monthNumber ? Number(rowMonth.split("-").at(-1)) !== monthNumber : rowMonth.toLowerCase() !== month.toLowerCase()) return false;
+    }
+    const cycleFilter = params.paymentCycleFilter;
+    if (isRecord(cycleFilter) && typeof cycleFilter.threshold === "number") {
+      const cycle = Number.parseFloat(text(row.paymentCycle));
+      if (!Number.isFinite(cycle)) return false;
+      const threshold = cycleFilter.threshold;
+      if (cycleFilter.operator === ">" && !(cycle > threshold)) return false;
+      if (cycleFilter.operator === ">=" && !(cycle >= threshold)) return false;
+      if (cycleFilter.operator === "<" && !(cycle < threshold)) return false;
+      if (cycleFilter.operator === "<=" && !(cycle <= threshold)) return false;
+    }
+    return true;
+  });
   const summary = {
     ...summarizeChatbotOffers(rows),
     revenue: rows.reduce((total, row) => total + numberValue(row.revenue || row.salesAmount || row.amount), 0),
@@ -476,20 +505,35 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
   }
 
   async function submitReport(prompt: string, callbacks: ChatbotRunCallbacks, signal: AbortSignal): Promise<ChatbotSessionResult> {
-    let report: ChatbotReportViewResult = buildChatbotReport(prompt, { offers }, currentLanguage);
-    const detectedIntent = report.intent;
+    let classification: ChatbotClassification | null = null;
     if (options.llmEnabled !== false) {
       try {
-        await (options.classify || defaultClassify)(prompt, offerCategories(offers), signal);
+        classification = normalizeChatbotClassification(await (options.classify || defaultClassify)(prompt, offerCategories(offers), signal));
       } catch {
         // 本地规则始终是确定性 fallback；LLM 分类失败不应清空报告。
       }
     }
 
+    if (signal.aborted) return stoppedResult("report", source);
+    const reportOffers = mergeChatbotKeywords(offers, options.getProductKeywords?.());
+    let report: ChatbotReportViewResult = buildChatbotReport(prompt, { offers: reportOffers }, currentLanguage, classification);
+    const detectedIntent = report.intent;
+
     if (detectedIntent === "payment") {
-      report = paymentReport(prompt, options.paymentRecords || extractPaymentRecords(offers), currentLanguage);
+      report = paymentReport(prompt, options.paymentRecords || extractPaymentRecords(offers), currentLanguage, classification);
     } else if (detectedIntent === "analysis") {
-      const rows = reportAnalysisRows(prompt, offers);
+      const targets = classificationValues(classification?.params.analysisTargets);
+      if (!targets.length) targets.push(...classificationValues(classification?.params.analysisTarget));
+      const rows = targets.length
+        ? [...new Set(targets.flatMap((target) => {
+          const type = classification?.params.analysisType;
+          const targetClassification: ChatbotClassification | null = type === "merchant"
+            ? { intent: "merchant", params: { merchantName: target } }
+            : type === "category" ? { intent: "category", params: { category: [target] } }
+              : type === "tier" ? { intent: "tier", params: { tier: [target] } } : null;
+          return buildChatbotReport(target, { offers: reportOffers }, currentLanguage, targetClassification).rows;
+        }))]
+        : reportAnalysisRows(prompt, reportOffers);
       const analysisText = await (options.analyze || defaultAnalyze)(
         { ...summarizeChatbotOffers(rows), rows: rows.slice(0, 50), query: prompt },
         currentLanguage,

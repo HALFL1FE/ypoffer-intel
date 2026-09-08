@@ -46,6 +46,31 @@ const data: ChatbotReportData = {
 };
 
 describe("chatbotReportModel", () => {
+  it("preserves multiple classified categories and tiers", () => {
+    const result = buildChatbotReport("Show both groups", data, "en", {
+      intent: "category", params: { category: ["Electronics", "Home"], tier: ["Tier 1", "Tier 2"] }
+    });
+    expect(result.intent).toBe("category");
+    expect(result.rows.map((row) => row.merchantId)).toEqual(["398679", "398680"]);
+  });
+
+  it("applies classified recommendation filters, sorting, and count", () => {
+    const result = buildChatbotReport("Pick an offer", data, "en", {
+      intent: "recommendation", params: {
+        tier: ["Tier 1", "Tier 2"], count: 1,
+        metricFilters: [{ field: "clicks", operator: ">=", value: 50 }],
+        metricSort: { field: "salesAmount", direction: "asc" }
+      }
+    });
+    expect(result.rows.map((row) => row.merchantId)).toEqual(["398680"]);
+  });
+
+  it("uses the classified ASIN rather than the original wording", () => {
+    expect(buildChatbotReport("Find the product", data, "en", {
+      intent: "asin", params: { asin: "B0TEST123" }
+    }).rows).toEqual([data.offers[0]]);
+  });
+
   it("summarizes numeric offer metrics without mutating source rows", () => {
     expect(summarizeChatbotOffers(data.offers)).toEqual({
       offerCount: 3,

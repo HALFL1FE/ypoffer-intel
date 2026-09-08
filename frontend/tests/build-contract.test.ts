@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createModernAppApi, getAppSnapshot } from "../src/runtime/modernApp";
+import { createChatbotSession } from "../src/features/chatbot/chatbotSession";
 import type {
   AppBootstrapData,
   ModernPageFactory,
@@ -26,6 +27,29 @@ function bootstrapData(): AppBootstrapData {
 }
 
 describe("Modern Runtime 构建契约", () => {
+  it("delivers a lazy keyword update to an existing chatbot session without replacing its state", async () => {
+    const modernApp = createModernAppApi();
+    modernApp.bootstrap(bootstrapData());
+    const session = createChatbotSession({
+      offers: [{ merchantId: "merchant-1", merchantName: "Fixture", tier: "Tier 1" }],
+      language: "en", llmEnabled: false, enableQuestionLogging: false,
+      getProductKeywords: () => getAppSnapshot().value.productKeywords
+    });
+    const priorResult = await session.submit("Fixture");
+    session.addMemory?.(priorResult);
+    modernApp.updateProductKeywords({ merchants: [{ merchantId: "merchant-1", productTitles: ["Solar garden lantern"] }] });
+    expect((await session.submit("Solar garden lantern")).ok).toBe(true);
+    expect(session.getState().memory).toHaveLength(1);
+  });
+
+  it("does not accept keyword updates for Google Ads-only users", () => {
+    const modernApp = createModernAppApi();
+    const data = bootstrapData();
+    modernApp.bootstrap({ ...data, user: { ...data.user, level: 2 } });
+    modernApp.updateProductKeywords({ merchants: [{ merchantId: "merchant-1" }] });
+    expect(getAppSnapshot().value.productKeywords).toEqual({ merchants: [] });
+  });
+
   it("接收现代入口的结构化启动数据，但不提前注册业务页面", () => {
     const modernApp = createModernAppApi();
 
