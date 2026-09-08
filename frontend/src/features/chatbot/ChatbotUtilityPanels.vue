@@ -37,6 +37,8 @@ const emit = defineEmits<{
 }>();
 
 const root = ref<HTMLElement | null>(null);
+const helpButton = ref<HTMLButtonElement | null>(null);
+const guideButton = ref<HTMLButtonElement | null>(null);
 const logsButton = ref<HTMLButtonElement | null>(null);
 const logsOpen = ref(false);
 const lightboxSrc = ref("");
@@ -68,6 +70,14 @@ function toggleLogs(): void {
   logsOpen.value = !logsOpen.value;
 }
 
+function toggleHelp(): void {
+  emit("help");
+}
+
+function toggleGuide(): void {
+  emit("guide");
+}
+
 function closeLogs(restoreFocus = false): void {
   if (!logsOpen.value) return;
   logsOpen.value = false;
@@ -95,6 +105,18 @@ function handleKeydown(event: KeyboardEvent): void {
   if (logsOpen.value) {
     event.preventDefault();
     closeLogs(true);
+    return;
+  }
+  if (props.utility.helpOpen) {
+    event.preventDefault();
+    helpButton.value?.focus();
+    emit("help");
+    return;
+  }
+  if (props.utility.guideOpen) {
+    event.preventDefault();
+    guideButton.value?.focus();
+    emit("guide");
   }
 }
 
@@ -121,11 +143,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="root" class="chatbot-utility-panels" data-chatbot-utility @click="handlePanelClick">
-    <button type="button" class="mode-btn mode-help" data-chatbot-action="help" :aria-expanded="utility.helpOpen" @click="emit('help')">
+    <button ref="helpButton" type="button" class="mode-btn mode-help" data-chatbot-action="help" :aria-expanded="utility.helpOpen" @click="toggleHelp">
       <span class="mode-help-icon" aria-hidden="true">?</span>
       <span>{{ copy.help }}</span>
     </button>
-    <button type="button" class="mode-btn mode-user-guide" data-chatbot-action="guide" :aria-expanded="utility.guideOpen" @click="emit('guide')">
+    <button ref="guideButton" type="button" class="mode-btn mode-user-guide" data-chatbot-action="guide" :aria-expanded="utility.guideOpen" @click="toggleGuide">
       <span class="mode-help-icon" aria-hidden="true">i</span>
       <span>{{ copy.guide }}</span>
     </button>

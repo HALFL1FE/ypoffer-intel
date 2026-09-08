@@ -69,7 +69,8 @@ const emit = defineEmits<{
   (event: "clone"): void;
   (event: "overlay"): void;
   (event: "cancel"): void;
-  (event: "download", downloadId: string): void;
+  (event: "download", downloadId: string, answerId?: string): void;
+  (event: "context-interact", action: string, value?: string): void;
   (event: "trend-interact", action: DeepWindowInteraction, value?: string): void;
   (event: "trend-columns", columns: readonly string[]): void;
   (event: "drop-memory"): void;
@@ -100,6 +101,9 @@ const memoryActionLabel = computed(() => props.addedToMemory
 const stopLabel = computed(() => props.language === "zh" ? "停止" : "Stop");
 const closeLabel = computed(() => props.language === "zh" ? "关闭" : "Close");
 const restoreLabel = computed(() => props.language === "zh" ? "恢复" : "Restore");
+const pinLabel = computed(() => props.pinned ? (props.language === "zh" ? "取消置顶" : "Unpin") : (props.language === "zh" ? "置顶" : "Pin"));
+const cloneLabel = computed(() => props.language === "zh" ? "复制" : "Clone");
+const overlayLabel = computed(() => props.overlay ? (props.language === "zh" ? "退出浮层" : "Exit overlay") : (props.language === "zh" ? "浮层" : "Overlay"));
 const errorText = computed(() => props.errorMessage || (status.value === "cancelled"
   ? (props.language === "zh" ? "分析已停止。" : "The analysis was stopped.")
   : (props.language === "zh" ? "分析失败，请稍后重试。" : "The analysis failed. Please try again.")));
@@ -210,7 +214,10 @@ function handleChartClick(event: MouseEvent): void {
   if (!target) return;
   const downloadId = target.getAttribute("data-download-id");
   if (downloadId) {
-    emit("download", downloadId.slice(0, 120));
+    if (target.closest("[data-chatbot-result]")) return;
+    const answerId = props.result.sessionResult?.answerId;
+    if (answerId) emit("download", downloadId.slice(0, 120), answerId);
+    else emit("download", downloadId.slice(0, 120));
     return;
   }
   if (target.matches("button[data-trend-metric]")) {
@@ -288,6 +295,9 @@ onBeforeUnmount(() => pointerUp());
         <template v-else-if="!isLoading">
           <button v-if="isContent" class="deep-window-chat-add" type="button" data-deep-window-action="add-memory" :disabled="!canAddMemory || addedToMemory" @click="emit('add-memory')">{{ memoryActionLabel }}</button>
           <button v-if="isContent && canExport" type="button" data-deep-window-action="export" @click="emit('export')">⇩</button>
+          <button v-if="isContent" type="button" data-deep-window-action="pin" :aria-label="pinLabel" :aria-pressed="pinned" @click="emit('pin')">{{ pinned ? "★" : "☆" }}</button>
+          <button v-if="isContent" type="button" data-deep-window-action="clone" :aria-label="cloneLabel" @click="emit('clone')">＋</button>
+          <button v-if="isContent" type="button" data-deep-window-action="overlay" :aria-label="overlayLabel" :aria-pressed="overlay" @click="emit('overlay')">▣</button>
         </template>
         <button v-if="isLoading && canCancel" class="deep-window-stop" type="button" data-deep-window-action="stop" @click="emit('cancel')">{{ stopLabel }}</button>
         <button v-if="!minimized && canMinimize && !isLoading" class="deep-window-minimize" type="button" data-deep-window-action="minimize" aria-label="Minimize" @click="emit('minimize')">—</button>
@@ -306,9 +316,14 @@ onBeforeUnmount(() => pointerUp());
       <section v-else-if="isContent" class="deep-window-content" data-deep-window-report>
         <h2 class="deep-report-title">{{ windowTitle }}</h2>
         <p v-if="windowSummary" class="deep-report-summary">{{ windowSummary }}</p>
-        <div v-if="reportHtml" class="deep-report-sections" data-deep-window-sections v-html="reportHtml"></div>
+        <div v-if="reportHtml && !result.document" class="deep-report-sections" data-deep-window-sections v-html="reportHtml"></div>
         <div v-else class="deep-report-sections" data-deep-window-sections>
-          <ChatbotResultView :language="language" :result="result" @download="emit('download', $event)" />
+          <ChatbotResultView
+            :language="language"
+            :result="result"
+            @download="(downloadId, answerId) => emit('download', downloadId, answerId)"
+            @context-interact="(action, value) => emit('context-interact', action, value)"
+          />
         </div>
         <div class="deep-window-feedback" data-deep-window-feedback>
           <ChatAnswerActions

@@ -17,7 +17,7 @@ const emit = defineEmits<{
   (event: "open-answer", answerId: string): void;
   (event: "context-interact", action: string, value?: string): void;
   (event: "download-overview"): void;
-  (event: "download", downloadId: string): void;
+  (event: "download", downloadId: string, answerId?: string): void;
 }>();
 
 const props = defineProps<{
@@ -93,10 +93,10 @@ const commandMenu = ref<InstanceType<typeof ChatbotCommandMenu> | null>(null);
 
 function handleContextInteraction(event: Event): void {
   const target = event.target instanceof HTMLElement
-    ? event.target.closest<HTMLElement>("[data-trend-metric], [data-trend-category-select], [data-trend-column-toggle], [data-trend-column-core], [data-trend-column-all], [data-payment-month], [data-context-action]")
+    ? event.target.closest<HTMLElement>("[data-trend-metric], [data-trend-metric-select], [data-trend-category-select], [data-trend-column-toggle], [data-trend-column-core], [data-trend-column-all], [data-payment-month], [data-context-action]")
     : null;
   if (!target) return;
-  if (target.matches("[data-trend-metric]")) {
+  if (target.matches("[data-trend-metric], [data-trend-metric-select]")) {
     const metric = target.getAttribute("data-trend-metric");
     if (metric) emit("context-interact", "trend-metric", metric);
   } else if (target.matches("[data-trend-category-select]")) {
@@ -165,7 +165,13 @@ function handleReportSummaryKeydown(event: KeyboardEvent): void {
             </div>
           </div>
           <div v-if="contextRichHtml" class="chatbot-rich-context" data-chatbot-context-html v-html="contextRichHtml"></div>
-          <ChatbotResultView v-else-if="result" :language="language" :result="result" @download="emit('download', $event)" />
+          <ChatbotResultView
+            v-else-if="result"
+            :language="language"
+            :result="result"
+            @download="(downloadId, answerId) => emit('download', downloadId, answerId)"
+            @context-interact="(action, value) => emit('context-interact', action, value)"
+          />
           <div v-else class="chatbot-report-empty" data-chatbot-report-empty>
             <span class="chatbot-report-empty-mark" aria-hidden="true">□</span>
             <strong>{{ language === 'zh' ? '还没有报告' : 'No report yet' }}</strong>

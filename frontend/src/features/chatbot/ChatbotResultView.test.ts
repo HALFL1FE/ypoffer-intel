@@ -60,4 +60,22 @@ describe("ChatbotResultView", () => {
 
     expect(wrapper.emitted("download")).toEqual([["download-1"]]);
   });
+
+  it("forwards the owning answerId with a report download", async () => {
+    const result = buildChatbotReport("Alpha", data, "en");
+    const wrapper = mount(ChatbotResultView, {
+      props: {
+        language: "en",
+        result: {
+          ...result,
+          sessionResult: { answerId: "answer-a" } as never,
+          contentHtml: '<button type="button" data-download-id="download-a">Download Excel</button>'
+        }
+      }
+    });
+
+    await wrapper.get('[data-download-id="download-a"]').trigger("click");
+
+    expect(wrapper.emitted("download")).toEqual([["download-a", "answer-a"]]);
+  });
 });

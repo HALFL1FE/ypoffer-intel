@@ -81,6 +81,9 @@ import type { GoogleAdsLoadRequest } from "./features/google-ads/useGoogleAds";
 import ChatbotPage from "./features/chatbot/ChatbotPage.vue";
 import { createChatbotSession } from "./features/chatbot/chatbotSession";
 import type { ChatbotReportViewResult, ChatbotSession } from "./features/chatbot/chatbotViewTypes";
+import { createReportDataProvider } from "./features/chatbot/report/reportDataProvider";
+import { reportExportFilename, toExportSheets } from "./features/chatbot/report/reportExport";
+import type { ReportDocument } from "./features/chatbot/report/reportContracts";
 import AgentPage, { type AgentRunResult, type AgentRunner } from "./features/agent/AgentPage.vue";
 import { createAgentSession, type AgentSession } from "./features/agent/agentSession";
 import AppShell from "./shell/AppShell.vue";
@@ -896,6 +899,10 @@ let modernChatbotSession: ChatbotSession | null = null;
 let modernAgentSession: AgentSession | null = null;
 
 function downloadChatbotReport(result: ChatbotReportViewResult): boolean {
+  const document = result.document || ("documentId" in result ? result as unknown as ReportDocument : null);
+  if (document) {
+    return downloadWorkbook(reportExportFilename(document), { sheets: toExportSheets(document) });
+  }
   const rows = result.rows.length
     ? result.rows
     : [{ query: result.query, intent: result.intent, source: result.source, message: result.message, ...result.summary }];
@@ -912,10 +919,33 @@ function downloadChatbotReport(result: ChatbotReportViewResult): boolean {
 
 function chatbotSession(snapshot: AppBootstrapData): ChatbotSession {
   if (!modernChatbotSession) {
+    const chatbotData = isRecord(snapshot.chatbotData) ? snapshot.chatbotData : {};
+    const sourceMeta = isRecord(chatbotData.sources) ? chatbotData.sources : {};
+    const reportProvider = createReportDataProvider({
+      offers: offerRecords(snapshot),
+      paymentRecords: paymentRecords(snapshot),
+      keywords: snapshot.productKeywords,
+      source: sourceMeta.mode === "db" ? "db" : "cache",
+      asOf: stringValue(sourceMeta.checkedAt) || stringValue(chatbotData.checkedAt) || null,
+      preferRemote: true,
+      loadOffers: (signal) => apiRequest<unknown>("/api/ui/db/chatbot-offers", { signal }),
+      loadKeywords: (signal) => apiRequest<unknown>("/api/ui/db/keywords", { signal }),
+      loadMerchant: (merchantId, months, signal) => apiRequest<unknown>(`/api/ui/db/merchant?${new URLSearchParams({ merchantId, months: String(months), limit: "50" }).toString()}`, { signal, timeoutMs: 30_000 }),
+      loadSearch: (query, signal) => apiRequest<unknown>(`/api/ui/db/search?${new URLSearchParams({ q: query, limit: "25" }).toString()}`, { signal }),
+      loadPublishers: (signal) => apiRequest<unknown>("/api/ui/db/publishers", { signal, timeoutMs: 30_000 }),
+      loadPublisherPortfolio: (userId, startDate, endDate, signal) => {
+        const query = new URLSearchParams({ userId });
+        if (startDate) query.set("startDate", startDate);
+        if (endDate) query.set("endDate", endDate);
+        return apiRequest<unknown>(`/api/ui/db/publishers?${query.toString()}`, { signal, timeoutMs: 30_000 });
+      }
+    });
     modernChatbotSession = createChatbotSession({
       offers: offerRecords(snapshot),
       getProductKeywords: () => getAppSnapshot().value.productKeywords,
       paymentRecords: paymentRecords(snapshot),
+      productKeywords: snapshot.productKeywords,
+      reportProvider,
       language: snapshot.language,
       llmEnabled: snapshot.llmEnabled,
       storage: browserStorage(),

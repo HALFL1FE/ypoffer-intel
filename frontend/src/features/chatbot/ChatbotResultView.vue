@@ -2,15 +2,23 @@
 import { computed } from "vue";
 
 import type { UiLanguage } from "../../shared/i18n";
+import ChatbotReportBlocks from "./ChatbotReportBlocks.vue";
 import type { ChatbotReportViewResult } from "./chatbotViewTypes";
+import type { ReportDocument } from "./report/reportContracts";
 
 const props = defineProps<{
   readonly language: UiLanguage;
   readonly result: ChatbotReportViewResult;
 }>();
 
+const structuredDocument = computed<ReportDocument | null>(() => {
+  if (props.result.document) return props.result.document;
+  return "documentId" in props.result ? props.result as unknown as ReportDocument : null;
+});
+
 const emit = defineEmits<{
-  (event: "download", downloadId: string): void;
+  (event: "download", downloadId: string, answerId?: string): void;
+  (event: "context-interact", action: string, value?: string): void;
 }>();
 
 type Row = Readonly<Record<string, unknown>>;
@@ -100,7 +108,11 @@ function handleDownload(event: MouseEvent): void {
   const root = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   if (!target || !root || !root.contains(target)) return;
   const downloadId = target.getAttribute("data-download-id")?.trim();
-  if (downloadId) emit("download", downloadId.slice(0, 120));
+  if (downloadId) {
+    const answerId = props.result.sessionResult?.answerId;
+    if (answerId) emit("download", downloadId.slice(0, 120), answerId);
+    else emit("download", downloadId.slice(0, 120));
+  }
 }
 </script>
 
@@ -131,13 +143,21 @@ function handleDownload(event: MouseEvent): void {
       </article>
     </div>
 
+    <ChatbotReportBlocks
+      v-if="structuredDocument?.blocks.length"
+      :language="language"
+      :blocks="structuredDocument.blocks"
+      data-chatbot-structured-report
+      @interact="(action, value) => emit('context-interact', action, value)"
+    />
+
     <div v-if="result.contentHtml" class="chatbot-result-rich-html" data-chatbot-rich-result v-html="result.contentHtml"></div>
 
-    <p v-else-if="!result.rows.length" data-chatbot-empty data-chatbot-explicit-state="empty" class="chatbot-result-empty">
+    <p v-else-if="!structuredDocument && !result.rows.length" data-chatbot-empty data-chatbot-explicit-state="empty" class="chatbot-result-empty">
       {{ result.message || copy.empty }}
     </p>
 
-    <div v-else class="chatbot-result-table-wrap">
+    <div v-else-if="!structuredDocument" class="chatbot-result-table-wrap">
       <table class="chatbot-result-table">
         <thead>
           <tr>

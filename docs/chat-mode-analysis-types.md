@@ -191,7 +191,7 @@ Chat Mode 会依据记忆栏中的 summary、表格和对比字段回答；如�
 - Top/Bottom 的排序指标是 `affCommission`，不是 EPC 或销售额。
 - 单品类分析没有商户级百分位，也没有品类健康总分。
 
-实现核查补充：`analyzeCategory()` 会计算 `bottomMerchants`，但当前 `renderCategoryAnalysisTable()` 只渲染 Top 5，Bottom 3 尚未出现在可见报告表格中。除非后续补充渲染逻辑，否则不应把 Bottom 3 描述为当前用户一定能看到的输出。
+实现核查补充：旧版 `analyzeCategory()` 会计算 `bottomMerchants`，但旧版 `renderCategoryAnalysisTable()` 只渲染 Top 5，Bottom 3 不在该旧路径的可见表格中。当前 Vue Report 走 `reportEngine.ts` 的结构化 `entity-results`/Recommendation 表，不会自动把旧版 `bottomMerchants` 当作可见区块；需要区分“旧分析对象字段”和“当前页面实际展示”。
 
 ### 5.3 Chat Mode 的适合追问
 
@@ -306,7 +306,7 @@ Agent 的 `tier_analysis` 还返回：
 - 品类：获取该品类全部商户的月度数据后按月份聚合。
 - Tier：获取该 Tier 全部商户的月度数据后按月份聚合。
 
-品类趋势默认排除 Tier 4 和 BLACK TIER；这与单品类静态分析的全 Tier 口径不同。
+品类趋势未指定 Tier 时默认排除 Tier 4 和 BLACK TIER；明确指定 Tier 时按请求纳入。这与单品类静态分析的默认过滤口径一致，但显式 Tier 条件会覆盖默认排除。
 
 ### 9.3 计算内容
 
@@ -335,7 +335,7 @@ Agent 的 `tier_analysis` 还返回：
 - 估算趋势不是真实月度表现，只能作为方向性参考，界面会标记为估算或提示数据不足。
 - 趋势本身比较时间变化，不计算同品类百分位。
 
-实现核查补充：商户趋势可以从月度数据取得 DPV、ATC 和 CVR 等字段；但当前品类/Tier 聚合函数主要聚合 Revenue、Orders、Clicks、Payout 和 Affiliate Payout，DPV、ATC、CVR 不一定有真实的聚合月度值。趋势界面虽然有这些指标选项，实际显示前应确认数据源是否提供了对应字段。
+实现核查补充：商户趋势可以从月度数据取得 DPV、ATC 和 CVR 等字段；但当前品类/Tier 聚合函数主要聚合 Revenue、Orders、Clicks、Payout 和 Affiliate Payout，DPV、ATC、CVR 不一定有真实的聚合月度值。趋势界面虽然有这些指标选项，实际显示前应确认数据源是否提供了对应字段；显式 Tier 趋势会按请求加载该 Tier 的商户月度详情并报告覆盖状态。
 
 ## 10. 媒体记录分析
 
@@ -389,7 +389,7 @@ Gross Profit = allCommission - affCommission
 
 - 活跃商家只要 Clicks、DPV、ATC、Orders、Sales、All Commission 或 Aff Commission 中任一项大于 0 即纳入。
 - 品类偏好按销售额排序，不是按商户数量排序。
-- 合作商家明细设计上希望按 Sales 降序；但当前 Chat Mode 媒体画像的 `publisherProfileRowsForMarket()` 只做活跃过滤，没有显式按 Sales 排序，因此实际顺序不能保证。
+- 合作商家明细在当前 Vue Report 中通过 `portfolioSort: "sales"` 请求按 Sales 降序；如果来源没有可比较的 Sales 值，排序仍只能反映来源可用数据，不能把顺序当作业务排名。
 - 当前 Publisher 数据路径使用 `75% × All Commission` 推算 Affiliate Commission；这与商户分析直接使用 `affCommission` 的路径不同。
 - 媒体画像没有媒体之间的百分位或 Peer 对比。
 
@@ -470,3 +470,33 @@ Chat Mode 可以综合多张记忆报告，也可以对 Agent 已支持的当前
 4. 明确品类静态分析与品类趋势的 Tier 范围，避免一个默认全量、一个默认排除 Tier 4/BLACK。
 5. 将所有比较规则集中到独立配置或 helper，避免商户、品类、Tier、媒体各自维护一套公式。
 6. 在 Chat Mode 记忆栏中显示数据时间、样本量、比较范围和口径标签，让 LLM 能明确知道结论的适用范围。
+
+## 16. Vue Report 对齐实现补充（2026-09-08）
+
+前文保留了旧版函数和迁移期间的口径记录。本节说明当前 Vue Chatbot 已落地的 Report 结果模型；独立 Agent 的七个服务端工具合同不因本次补全而改变。
+
+### 16.1 当前报告边界
+
+当前路径为 `chatbotSession.ts` → `reportQuery.ts` → `reportDataProvider.ts` → `reportEngine.ts`。Report 先得到规范查询，再读取 bootstrap/cache 或现有浏览器安全 DB 接口，数值由结构化模型计算，LLM 只负责分类和可选文字解释。分类 JSON 和 Analyze 请求有 UTF-8 字节上限；远程数据为空或 `ok=false` 时保留缓存或明确输出不可用态。
+
+当前支持 Merchant、ASIN、Keyword、Category、Tier、Recommendation、Payment、Analysis/Trend、Publisher Records、Publisher Profile 和 Help。未解析的商户、ASIN、关键词或媒体不会退化成全量列表；同名商户/媒体返回候选并要求选择。报告、Deep Window、Memory、View 和 Excel 共享同一 `ReportDocument`/快照。
+
+### 16.2 分析与趋势口径
+
+- EPC = AFF Commission / Clicks；CVR = Orders / Clicks；AOV = Sales / Orders；佣金率 = AFF Commission / Sales。
+- EPC/CVR 只有 Clicks ≥ 100 时参与百分位判断；AOV/佣金率只有 Orders ≥ 10 时参与百分位判断。可比 Peer 默认限制为同品类、同 Tier，并按 AFF Commission 取前 3 个。
+- 单品类静态报告默认排除 Tier 4 和 BLACK TIER；明确指定 Tier 或显式包含条件时才纳入。推荐品类排名沿用同一默认排除规则。
+- 趋势优先使用月度 DB 数据；缺月时标记 estimated/partial，不把估算值当成真实值。Category 未指定 Tier 时排除 Tier 4/BLACK，显式 Tier 趋势按请求加载对应商户详情并保留 covered/requested 覆盖状态；月度商户 Amazon 与 aggregate 数据按月份合并，避免同一月份重复显示。
+- 趋势交互的指标、品类和可见列会同步更新当前报告和导出列，不改变原始报告快照的回答绑定。
+
+### 16.3 Publisher Records 与 Profile
+
+Publisher Records 的 Report 口径参考 Publishers 页的 Publisher Records：空过滤默认展示按 Clicks 降序的前 50 条，摘要使用完整筛选结果；支持 market、network、manager、merchant、媒体 ID、排序和 limit 条件，并保留用户 ID、名称、经理、Clicks、CVR、DPV、ATC、Orders、Sales、佣金和 Gross Profit 字段。
+
+Publisher Profile 先解析唯一媒体或给出候选，再请求 portfolio 明细；唯一媒体即使 portfolio 明细暂时失败，也保留媒体 KPI。当前可见结果包含 `publisher-portfolio`（Merchant、Market、Network、Category、Tier、Sales share、AFF EPC、CVR、AOV、Orders、Sales、AFF Commission）以及 Category affinity、AOV bands、Market distribution、Affinity signals 四个区块。底层 `publisherModel.ts` 仍在缺少直接 `affCommission` 时使用既有 `75% × All Commission` 回退口径，因此第 11.2 节的限制仍然有效。
+
+### 16.4 记忆推荐与帮助引导
+
+Memory 推荐固定在单一报告快照内，按唯一商户 ID 计数；多报告歧义、无快照、零匹配或数量不足会给出对应状态，只有 `ready` 才允许 View-only 下载。帮助、指南、日志和图片预览支持 Escape；五步 onboarding 由真实的报告提交、报告完成、加入 Memory 和进入 Chat 事件推进，失败或没有报告时不会伪造进度。
+
+以上实现已通过固定数据和组件/session 自动化测试。真实登录、DB/LLM/SSE、BrowserAct 页面交互以及生产部署仍需单独验收，不能由模型测试替代。

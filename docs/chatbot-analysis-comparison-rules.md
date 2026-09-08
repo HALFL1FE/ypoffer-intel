@@ -239,10 +239,23 @@ AFF Comm % = affCommission / salesAmount * 100
 - [ ] LLM：`skills/analysis_text.py` 是否仍能正确解释新的 summary 字段。
 - [ ] 测试：为公式、边界值、缺失值和口径一致性补充回归测试。
 
-## 11. 相关文件
+## 11. Vue Report 当前可见字段
+
+前文的 `analyzeCategory()`、`renderCategoryAnalysisTable()` 和商户比较描述保留旧版口径。当前 Vue Chatbot 不再通过 `public/app.js` 渲染这些对象，而是由 `reportEngine.ts` 生成结构化 blocks：
+
+- Analysis 的 `analysis-results`/`analysis-peers` 可见列为 Merchant ID、Merchant、Tier、Category、EPC、CVR、AFF Comm%、AOV、Orders、Clicks、EPC percentile 和 CVR percentile；当前没有单独的 Bottom 3 表。
+- Category/Tier 的实体报告展示匹配结果表；Recommendation 的分类表展示 Rank、Category、Score、Offer count、Revenue 和 EPC。旧版 `bottomMerchants` 字段不能作为当前 Vue 页面已展示的证据。
+- Category 趋势未指定 Tier 时排除 Tier 4/BLACK；显式指定 Tier 时按请求纳入。趋势列面板的指标、品类和可见列会同步当前报告与导出列。
+- Publisher Profile 的可见区块为 KPI、portfolio、Category affinity、AOV bands、Market distribution 和 Affinity signals；portfolio 列包含 Merchant、Market、Network、Category、Tier、Sales share、AFF EPC、CVR、AOV、Orders、Sales 和 AFF Commission。
+
+上述是页面可见字段，不等同于底层 payload 中可能保留的额外 summary 字段；真实登录、数据库数据和浏览器几何仍需独立验收。
+
+## 12. 相关文件
 
 - [Chatbot 完整档案](chatbot-feature-report.md)
-- [`public/app.js`](../public/app.js)
+- [`public/auth.js`](../public/auth.js)
+- [`frontend/src/features/chatbot/report/reportEngine.ts`](../frontend/src/features/chatbot/report/reportEngine.ts)
+- [`frontend/src/features/chatbot/report/analysisReports.ts`](../frontend/src/features/chatbot/report/analysisReports.ts)
 - [`skills/analysis_text.py`](../skills/analysis_text.py)
 - [`offer_db.py`](../offer_db.py)
 - [`protected_data/db_offers_cache.json`](../protected_data/db_offers_cache.json)

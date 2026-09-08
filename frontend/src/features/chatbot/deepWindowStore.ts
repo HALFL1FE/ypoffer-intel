@@ -78,6 +78,7 @@ export interface DeepWindowStore {
   addToChat(id?: string): boolean;
   interact(id: string, action: DeepWindowInteraction, value?: string): boolean;
   setTrendColumns(id: string, columns: readonly string[]): boolean;
+  updateResult(id: string, result: ChatbotReportViewResult): boolean;
   onChange(listener: (state: DeepWindowViewState) => void): () => void;
   dispose(): void;
 }
@@ -329,6 +330,22 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
     return update(target, (item) => ({ ...item, trendColumns: next }));
   }
 
+  function updateResult(id: string, result: ChatbotReportViewResult): boolean {
+    const target = safeId(id);
+    if (!target || !find(target)) return false;
+    return update(target, (item) => ({
+      ...item,
+      result,
+      title: result.title || result.category || result.tier || result.message || result.intent,
+      summary: result.message,
+      ...(result.contentHtml ? { contentHtml: result.contentHtml } : { contentHtml: undefined }),
+      status: result.status === "deferred" ? "cancelled" : "ready",
+      canCancel: false,
+      canExport: result.status !== "deferred",
+      canAddMemory: result.status !== "deferred"
+    }));
+  }
+
   function onChange(listener: (state: DeepWindowViewState) => void): () => void {
     if (disposed) return () => undefined;
     listeners.add(listener);
@@ -376,6 +393,7 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
     addToChat,
     interact,
     setTrendColumns,
+    updateResult,
     onChange,
     dispose
   };

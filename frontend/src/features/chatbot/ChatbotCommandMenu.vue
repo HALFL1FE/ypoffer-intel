@@ -14,12 +14,15 @@ interface CommandOption {
 
 const OPTIONS: readonly CommandOption[] = [
   { key: "merchant", intent: "merchant", zh: "商户", en: "Merchant", zhHint: "商户查询", enHint: "Merchant lookup" },
+  { key: "keyword", intent: "keyword", zh: "关键词", en: "Keyword", zhHint: "关键词查询", enHint: "Keyword lookup" },
   { key: "category", intent: "category", zh: "品类", en: "Category", zhHint: "品类查询", enHint: "Category lookup" },
   { key: "tier", intent: "tier", zh: "Tier", en: "Tier", zhHint: "Tier 概览", enHint: "Tier overview" },
   { key: "categorytier", intent: "category", zh: "品类 + Tier", en: "Category & Tier", zhHint: "某 Tier 内的品类查询", enHint: "Category within a tier" },
   { key: "trend", intent: "analysis", zh: "趋势", en: "Trend", zhHint: "趋势分析", enHint: "Trend analysis" },
   { key: "payment", intent: "payment", zh: "付款", en: "Payment", zhHint: "付款状态", enHint: "Payment status" },
-  { key: "asin", intent: "asin", zh: "ASIN", en: "ASIN", zhHint: "ASIN 查询", enHint: "ASIN lookup" }
+  { key: "asin", intent: "asin", zh: "ASIN", en: "ASIN", zhHint: "ASIN 查询", enHint: "ASIN lookup" },
+  { key: "publisher", intent: "publisher", zh: "媒体", en: "Publisher", zhHint: "媒体记录查询", enHint: "Publisher records" },
+  { key: "publisherprofile", intent: "publisherprofile", zh: "媒体画像", en: "Publisher profile", zhHint: "媒体画像", enHint: "Publisher profile" }
 ];
 
 const props = withDefaults(defineProps<{

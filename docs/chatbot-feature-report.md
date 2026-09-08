@@ -781,3 +781,36 @@ Agent 欢迎区会提示“已恢复上下文”；点击“新对话”或退�
 - 不满意反馈使用现有 `POST /api/chat/stream?operation=feedback` 写入；「日志 / Logs」菜单内与提问记录分组展示，分别通过 `GET /api/chat/stream?operation=feedback&format=csv|jsonl` 独立导出。
 - 共享领域与 HTTP 处理分别位于 `chatbot_answer_feedback.py`、`chatbot_answer_feedback_http.py`；没有新增 Vercel 路由文件。
 - 两张表的 `mode` 字段本身是 `VARCHAR(16)`，因此本次只扩展业务值，不新增表或执行 schema 迁移。
+
+## 18. Vue Chatbot 旧版功能对齐补全（2026-09-08）
+
+本节是当前 Vue 实现的执行补充；前文带有 `Legacy`、`public/app.js` 或旧辅助脚本的内容仍是历史行为来源，不代表当前运行时路径。
+
+### 18.1 当前实现链路
+
+Report Mode 现在由 `frontend/src/features/chatbot/chatbotSession.ts` 统一编排：先生成规范 `ReportQuery`，再通过 `reportDataProvider.ts` 读取 bootstrap/cache 或现有 `/api/ui/db/*` 远程数据，最后由 `reportEngine.ts` 生成 `ReportDocument`。分类器只补充受控参数；完整 JSON 请求按 UTF-8 字节限制，分类失败、超时或返回空值时回到本地规则。未知实体保持 `not_found`，不会扩大为默认前 50 条。
+
+已接入的 Report 路由包括：Merchant、ASIN、Keyword、Category、Tier、Recommendation、Payment、Analysis/Trend、Publisher Records、Publisher Profile 和 Help。查询层保留月份、付款状态/周期、Tier、品类、指标比较、排序、数量、排除/替换等条件，并对 `Tier 2 未付款`、`分析 Tier 2`、`/categorytier` 等有冲突风险的自然语言做明确分流。
+
+### 18.2 当前结构化结果与交互
+
+- Merchant/ASIN 结果包含概览、产品/映射、月度或流量角度；关键词结果等待迟到的关键词数据并保持 Tier、指标和排序条件。
+- Recommendation 将候选排序与 recommendation score 分离，保留推荐依据、流量角度、Tier 计划、缺口、排除和替换信息。
+- Payment 使用现有付款记录归一化，支持月份、状态、Tier、品类、商户和付款周期筛选；结果区块、摘要和导出共用同一筛选结果。
+- Analysis 先输出结构化指标和 Peer 区块，再可选调用现有 Analyze 接口；EPC/CVR 和 AOV/佣金率遵守点击数/订单数样本门槛，未匹配目标单独提示。
+- Trend 支持 Merchant、Category、Tier 的真实月度数据、估算点、部分覆盖和不可用状态；Category 未指定 Tier 时默认排除 Tier 4/BLACK，显式指定 Tier 时按请求纳入，并支持指标、品类、可见列与导出同步切换。
+- Publisher Records 参考 Publishers 页的 Records 口径：空过滤默认按 Clicks 降序，前 50 行与完整筛选汇总分离；Publisher Profile 支持候选选择、KPI、portfolio 明细，以及品类倾向、AOV 区间、市场分布和倾向信号区块。
+
+`ChatbotReportBlocks.vue`、`ChatbotTrendReport.vue` 和 `ChatbotResultView.vue` 负责结构化渲染，字段按列格式化并对空值显示中英文不可用文案。`DeepWindow.vue` / `deepWindowStore.ts` 绑定 `documentId` 和回答 ID，支持多窗口、拖动、最小化、置顶、clone、overlay、趋势操作和加入 Memory；旧回答不会被新报告覆盖。
+
+### 18.3 Memory、View/Excel、帮助和 onboarding
+
+`reportSnapshots.ts` 保存可复用快照，按原始行过滤并重算 Category Summary，保留重复源行、多工作表和列状态；Recommendation/Tier/Category 额外保留完整候选池，避免 Memory 只能看到当前截断页。Memory 推荐只从单一报告快照取候选，按唯一商户 ID 计数；只有 `ready` 状态显示 View-only 下载，歧义、零命中、不足数量或无快照均不可下载。`reportExport.ts` 让 View 和 Excel 使用同一份报告文档/快照，并按回答 ID 绑定旧回答导出。
+
+`ChatbotUtilityPanels.vue` 提供使用说明、使用流程、日志和图片预览；Help/Guide/Logs/lightbox 支持 Escape，帮助和指南关闭后将焦点返回触发按钮。`chatbotOnboardingModel.ts` 与 `ChatbotOnboarding.vue` 使用五步状态机，由真实的报告提交、报告完成、加入 Memory、进入 Chat 等事件推进；无报告或失败状态不会错误推进步骤。
+
+### 18.4 当前证据边界
+
+本次实现已通过 chatbot 专项 32 个测试文件/150 个用例、前端全量 84 个测试文件/388 个用例、TypeScript 类型检查、现代前端双 bundle 构建、CopilotKit runtime 6 个用例、AG-UI 11 个用例、Agent contract/planning/synthesis/registry 检查、M6 行为保持检查以及现有迁移/构建合同检查。`test_payment_placeholders.py` 在缺少 `output/payment_records.json` 时按设计跳过真实付款集成，因此不能替代付款数据验收。
+
+代码、固定 fixture 和 mock provider 的通过不等同于真实登录页面验收。本次尚未用 BrowserAct 记录 A02、A07、A08、A09、A17、A18、A21、A22、A24–A39；本轮 CLI 在 `browser-act get-skills core --skill-version 2.0.2` 处返回 `uv trampoline failed to canonicalize script path`，因此不计为浏览器通过。真实 DB/LLM/SSE 远程链路也尚未验证；部署、commit、push 和 PR 均不在本次范围内。

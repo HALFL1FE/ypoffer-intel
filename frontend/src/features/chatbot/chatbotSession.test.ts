@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createChatbotSession } from "./chatbotSession";
 import type { ChatbotChatRunner } from "./chatbotViewTypes";
+import { parityOffers } from "./report/fixtures/parityData";
+import { createReportDataProvider } from "./report/reportDataProvider";
 
 const offers = [
   {
@@ -32,7 +34,9 @@ describe("createChatbotSession", () => {
       offers: [...offers, other], language: "en", enableQuestionLogging: false,
       classify: async () => ({ intent: "merchant", params: { merchantId: "888888" } })
     });
-    expect((await session.submit("Tapo")).report?.rows).toEqual([other]);
+    const result = await session.submit("Tapo");
+    expect(result.report?.rows).toHaveLength(1);
+    expect(result.report?.rows[0]).toMatchObject(other);
   });
 
   it("applies classified payment filters without searching the original natural-language sentence as a name", async () => {
@@ -44,7 +48,8 @@ describe("createChatbotSession", () => {
     });
     const result = await session.submit("What do they owe for last month?");
     expect(result).toMatchObject({ ok: true, intent: "payment" });
-    expect(result.report?.rows).toEqual([record]);
+    expect(result.report?.rows).toHaveLength(1);
+    expect(result.report?.rows[0]).toMatchObject(record);
   });
 
   it("uses classified analysis targets and never substitutes unrelated merchants for an unknown target", async () => {
@@ -59,7 +64,9 @@ describe("createChatbotSession", () => {
 
   it.each([null, { intent: "publisher", params: {} }, { intent: "category", params: [] }])("falls back to local reports for invalid classifier output %j", async (classification) => {
     const session = createChatbotSession({ offers, language: "en", enableQuestionLogging: false, classify: async () => classification });
-    expect((await session.submit("Tapo")).report?.rows).toEqual(offers);
+    const result = await session.submit("Tapo");
+    expect(result.report?.rows).toHaveLength(1);
+    expect(result.report?.rows[0]).toMatchObject(offers[0]!);
   });
 
   it("falls back when classification fails and stops before analysis if classification is cancelled", async () => {
@@ -94,6 +101,46 @@ describe("createChatbotSession", () => {
     expect(offers[0]).not.toHaveProperty("productKeywords");
     keywords = null;
     expect((await session.submit("Tapo")).ok).toBe(true);
+  });
+
+  function storage(): Storage {
+    const values = new Map<string, string>();
+    return {
+      getItem: (key: string) => values.get(key) || null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+      clear: () => { values.clear(); },
+      key: (index: number) => [...values.keys()][index] || null,
+      get length() { return values.size; }
+    } as Storage;
+  }
+
+  it("首次打开自动显示引导，跳过后不再自动打开但仍可手动重播", () => {
+    const saved = storage();
+    const first = createChatbotSession({ offers, language: "en", storage: saved, enableQuestionLogging: false });
+
+    expect(first.getState().utility?.onboardingOpen).toBe(true);
+    first.skipOnboarding?.();
+    expect(saved.getItem("oi_onboarding_done")).toBe("1");
+
+    const second = createChatbotSession({ offers, language: "en", storage: saved, enableQuestionLogging: false });
+    expect(second.getState().utility?.onboardingOpen).toBe(false);
+    second.startOnboarding?.();
+    expect(second.getState().utility?.onboardingOpen).toBe(true);
+  });
+
+  it("报告失败停留在等待结果，且没有 Memory 时 Chat 事件不能推进到最后一步", async () => {
+    const session = createChatbotSession({ offers, language: "en", llmEnabled: false, enableQuestionLogging: false });
+    await session.submit("merchant that does not exist");
+
+    expect(session.getState().utility?.onboardingStep).toBe(2);
+    session.setMode("chat");
+    const runChat: ChatbotChatRunner = vi.fn(async () => ({ ok: true, response: "answer" }));
+    const chatSession = createChatbotSession({ offers, language: "en", llmEnabled: false, runChat, enableQuestionLogging: false });
+    chatSession.setMode("chat");
+    await chatSession.submit("chat without memory");
+
+    expect(chatSession.getState().utility?.onboardingStep).not.toBe(4);
   });
 
   it("uses the cached report model and exposes a structured snapshot", async () => {
@@ -140,6 +187,37 @@ describe("createChatbotSession", () => {
     expect(windowId).toBeTruthy();
     expect(session.deepWindows.addToChat(windowId!)).toBe(true);
     expect(session.getState().memory).toHaveLength(1);
+  });
+
+  it("加入 Memory 时保留回答对应的原始报告快照", async () => {
+    const session = createChatbotSession({ offers: parityOffers, language: "zh", llmEnabled: false, enableQuestionLogging: false });
+    const result = await session.submit("推荐 Electronics 前 1 个");
+
+    expect(session.addMemory?.(result)).toBe(true);
+    expect(session.getState().memory[0]?.result?.reportSnapshot).toMatchObject({
+      documentId: result.document?.documentId,
+      rankingOffers: expect.any(Array)
+    });
+  });
+
+  it("旧回答导出时使用旧 answerId，而不是被最新回答替换", async () => {
+    const downloadReport = vi.fn(() => true);
+    const session = createChatbotSession({
+      offers: [
+        { ...offers[0], merchantName: "Tapo", brand: "Tapo" },
+        { ...offers[0], merchantId: "398680", merchantName: "Shokz", brand: "Shokz" }
+      ],
+      language: "en",
+      llmEnabled: false,
+      enableQuestionLogging: false,
+      downloadReport
+    });
+    const first = await session.submit("Tapo");
+    await session.submit("Shokz");
+
+    const download = session.downloadRecommendation as ((downloadId: string, answerId?: string) => boolean) | undefined;
+    expect(download?.("answer-export", first.answerId ?? undefined)).toBe(true);
+    expect(downloadReport).toHaveBeenLastCalledWith(expect.objectContaining({ query: "Tapo" }));
   });
 
   it("does not leave a stopped request in the formal conversation", async () => {
@@ -207,5 +285,53 @@ describe("createChatbotSession", () => {
     });
     expect(session.interactContext?.("reminder-toggle")).toBe(true);
     expect(session.getState().utility?.reminderCollapsed).toBe(true);
+  });
+
+  it("uses classifier parameters to select the requested recommendation", async () => {
+    const session = createChatbotSession({
+      offers: parityOffers,
+      language: "zh",
+      llmEnabled: true,
+      enableQuestionLogging: false,
+      classify: async () => ({
+        intent: "recommendation",
+        params: {
+          tier: ["Tier 1"],
+          count: 1,
+          metricFilters: [{ field: "aov", operator: ">=", value: 100 }]
+        }
+      })
+    });
+
+    const result = await session.submit("按已说明的条件挑一项");
+
+    expect(result.ok).toBe(true);
+    expect(result.report?.rows.map((row) => row.merchantId)).toEqual(["1001"]);
+    session.dispose?.();
+  });
+
+  it("uses remote offers when resolving a merchant name that was absent from bootstrap", async () => {
+    const provider = createReportDataProvider({
+      offers: [],
+      loadOffers: async () => ({
+        offers: [
+          { merchantId: "2001", brand: "Live Merchant", tier: "Tier 1", category: "Electronics", salesAmount: 100, clicks: 100, orders: 2 },
+          { merchantId: "2002", brand: "Other Merchant", tier: "Tier 1", category: "Electronics", salesAmount: 900, clicks: 100, orders: 18 }
+        ]
+      })
+    });
+    const session = createChatbotSession({
+      offers: [],
+      reportProvider: provider,
+      language: "en",
+      llmEnabled: false,
+      enableQuestionLogging: false
+    });
+
+    const result = await session.submit("Live Merchant");
+
+    expect(result.ok).toBe(true);
+    expect(result.report?.rows.map((row) => row.merchantId)).toEqual(["2001"]);
+    session.dispose?.();
   });
 });
