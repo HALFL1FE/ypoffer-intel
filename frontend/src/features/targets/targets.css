@@ -9,7 +9,7 @@
   min-width: 0;
   margin: 0;
   padding: 0;
-  color: var(--target-ink, #17233c);
+  color: var(--target-ink, light-dark(#17233c, #e2eaf6));
   font-family: inherit;
 }
 

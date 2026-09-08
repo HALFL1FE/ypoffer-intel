@@ -56,7 +56,7 @@ export function usePageState(initialPage: ModernPageName, userLevel: AccessLevel
 
   function toggleGroup(group: NavigationLocation): void {
     if (openGroup.value === group) {
-      openGroup.value = navigationGroupForPage(currentPage.value) === group ? group : null;
+      openGroup.value = null;
       return;
     }
     openGroup.value = group;

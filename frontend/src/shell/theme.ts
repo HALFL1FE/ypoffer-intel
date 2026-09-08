@@ -33,9 +33,6 @@ export function applyTheme(documentRef: Document, theme: ShellTheme): void {
   const body = documentRef.body;
   if (!body) return;
   body.dataset.oiTheme = theme;
-  if (theme === "light") {
-    body.dataset.dashTheme = "light";
-  } else {
-    delete body.dataset.dashTheme;
-  }
+  body.dataset.dashTheme = theme;
+  documentRef.documentElement.style.colorScheme = theme;
 }

@@ -27,15 +27,15 @@
 }
 
 .publishers-modern-page .publisher-affinity-status.error {
-  border-color: #f1b9b9;
-  background: #fff5f5;
-  color: #b42318;
+  border-color: light-dark(#f1b9b9, #40526b);
+  background: light-dark(#fff5f5, #1a2638);
+  color: light-dark(#b42318, #dd9c97);
 }
 
 .publishers-modern-page .publisher-affinity-status.loading {
-  border-color: #c9d9e3;
-  background: #f6fafc;
-  color: #416273;
+  border-color: light-dark(#c9d9e3, #40526b);
+  background: light-dark(#f6fafc, #1a2638);
+  color: light-dark(#416273, #a5b4c8);
 }
 
 .publishers-modern-page .publisher-merchant-match-result {

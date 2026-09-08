@@ -7,3 +7,8 @@
   isolation: isolate;
   font-family: var(--oi-modern-font-family);
 }
+
+/* Page palette pairs follow the scheme selected by AppShell. Keep the light
+ * value first so the existing report palette and status hues remain explicit. */
+body[data-oi-theme="light"] { color-scheme: light; }
+body[data-oi-theme="dark"] { color-scheme: dark; background: #111a29; }

@@ -8,7 +8,7 @@
   width: 100%;
   margin: 0;
   padding: 0;
-  color: #2f4856;
+  color: light-dark(#2f4856, #e2eaf6);
   font-family: inherit;
 }
 
