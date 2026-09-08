@@ -78,6 +78,10 @@ const copy = computed(() => ({
   tierMixCard: message("categoryReport.tierMixCard", "03 Tier mix bar"),
   readableDistribution: message("categoryReport.readableDistribution", "Readable distribution"),
   allCategories: message("categoryReport.allCategories", "All categories"),
+  tableKicker: message("categoryReport.tableKicker", "Record view"),
+  tableTitle: message("categoryReport.tableTitle", "Category Records"),
+  tableHelp: message("categoryReport.tableHelp", "Performance by category · select a row to inspect merchants"),
+  categoriesInView: message("categoryReport.categoriesInView", "categories in view"),
   export: message("categoryReport.export", "Export focused category"),
   exportHint: message("categoryReport.exportHint", "Export the selected category rows with the existing XLSX generator."),
   noData: message("categoryReport.noData", "No category data is available for the selected tiers."),
@@ -431,8 +435,20 @@ onUnmounted(() => {
           </article>
         </section>
 
-        <div v-if="category.visibleGroups.value.length" class="table-wrap tier-category-table-wrap dashboard-category-table-wrap">
-          <table class="sheet-table tier-category-table dashboard-category-report-table">
+        <section v-if="category.visibleGroups.value.length" class="dashboard-category-records" aria-labelledby="category-records-title">
+          <div class="dashboard-category-table-toolbar">
+            <div class="dashboard-category-table-heading">
+              <span class="dashboard-category-table-kicker">{{ copy.tableKicker }}</span>
+              <h3 id="category-records-title">{{ copy.tableTitle }}</h3>
+              <p>{{ copy.tableHelp }}</p>
+            </div>
+            <div class="dashboard-category-table-meta" data-category-table-count>
+              <strong>{{ formatCount(category.visibleGroups.value.length) }}</strong>
+              <span>{{ copy.categoriesInView }}</span>
+            </div>
+          </div>
+          <div class="table-wrap tier-category-table-wrap dashboard-category-table-wrap">
+            <table class="sheet-table tier-category-table dashboard-category-report-table">
             <thead>
               <tr>
                 <th v-for="column in [
@@ -515,8 +531,9 @@ onUnmounted(() => {
                 </tr>
               </template>
             </tbody>
-          </table>
-        </div>
+            </table>
+          </div>
+        </section>
         <p v-else class="category-report-empty">{{ copy.noRows }}</p>
       </div>
     </section>

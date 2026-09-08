@@ -396,7 +396,7 @@ onUnmounted(() => tier.dispose());
         <table class="sheet-table" :style="{ minWidth: tableMinWidth }">
           <thead><tr><th class="tier-select-cell"><input class="tier-row-checkbox" type="checkbox" data-tier-select-all :checked="allVisibleSelected" :indeterminate.prop="tier.visibleSelectedCount.value > 0 && !allVisibleSelected" :disabled="!tier.visibleRows.value.length" aria-label="Select all visible merchants" @change="tier.selectAllVisible(($event.target as HTMLInputElement).checked)" /></th><th v-for="header in tier.displayHeaders.value" :key="header"><button class="table-sort-button" :class="{ active: tier.sortKey.value === header }" type="button" :data-tier-sort="header" @click="tier.setSort(header)"><span>{{ header }}</span><span class="sort-indicator" aria-hidden="true">{{ tier.sortKey.value === header ? (tier.sortDirection.value === 'asc' ? '▲' : '▼') : '↕' }}</span></button></th></tr></thead>
           <tbody>
-            <tr v-for="row in tier.visibleRows.value" :key="row.key" :class="rowClass(row)" :data-tier-row-key="row.key">
+            <tr v-for="row in tier.visibleRows.value" :key="row.key" :class="[rowClass(row), { 'is-selected': tier.selectedKeys.value.has(row.key) }]" :data-tier-row-key="row.key">
               <td class="tier-select-cell"><input class="tier-row-checkbox" type="checkbox" :data-tier-select-row="row.key" :checked="tier.selectedKeys.value.has(row.key)" :aria-label="'Select ' + (row.merchantName || row.merchantId || 'merchant')" @change="moveRowSelection($event, row.key)" /></td>
               <td v-for="header in tier.displayHeaders.value" :key="header" :data-tier-column="header">{{ formatCell(row.raw, header) }}</td>
             </tr>
