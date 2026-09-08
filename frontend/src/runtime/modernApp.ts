@@ -146,6 +146,11 @@ export function createModernAppApi(
       bootstrapReady = true;
     },
 
+    updateProductKeywords(productKeywords) {
+      if (!bootstrapReady || !canAccessPage(appSnapshot.value.user.level, "dashboard")) return;
+      appSnapshot.value = Object.freeze({ ...appSnapshot.value, productKeywords });
+    },
+
     mountApplication(element, initialPage = "agent") {
       const resolvedPage = pageIsAllowed(initialPage) && definitions[initialPage]
         ? initialPage

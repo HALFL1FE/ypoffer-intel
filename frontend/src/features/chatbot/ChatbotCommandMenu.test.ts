@@ -16,12 +16,13 @@ describe("ChatbotCommandMenu", () => {
       }
     });
 
-    expect(wrapper.findAll('[role="option"]')).toHaveLength(9);
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(7);
+    expect(wrapper.findAll('[role="option"]').some((option) => /Publisher/.test(option.text()))).toBe(false);
     expect(wrapper.get(".chat-intent-menu-title").text()).toContain("Question type");
     expect(wrapper.get(".chat-intent-menu-title kbd").text()).toBe("/");
-    expect(wrapper.findAll(".chat-intent-option.chatbot-command-option")).toHaveLength(9);
-    expect(wrapper.findAll(".chat-intent-option-prefix")).toHaveLength(9);
-    expect(wrapper.findAll(".chat-intent-option-hint")).toHaveLength(9);
+    expect(wrapper.findAll(".chat-intent-option.chatbot-command-option")).toHaveLength(7);
+    expect(wrapper.findAll(".chat-intent-option-prefix")).toHaveLength(7);
+    expect(wrapper.findAll(".chat-intent-option-hint")).toHaveLength(7);
     expect(wrapper.get(".chat-intent-option-prefix").text()).toBe(":");
 
     await wrapper.get("[data-chatbot-report-input]").trigger("keydown", { key: "ArrowDown" });

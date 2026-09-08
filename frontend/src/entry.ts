@@ -931,6 +931,7 @@ function chatbotSession(snapshot: AppBootstrapData): ChatbotSession {
   if (!modernChatbotSession) {
     modernChatbotSession = createChatbotSession({
       offers: offerRecords(snapshot),
+      getProductKeywords: () => getAppSnapshot().value.productKeywords,
       paymentRecords: paymentRecords(snapshot),
       language: snapshot.language,
       llmEnabled: snapshot.llmEnabled,
