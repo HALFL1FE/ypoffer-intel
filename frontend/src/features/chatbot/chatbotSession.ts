@@ -11,6 +11,14 @@ import { mergeChatbotKeywords } from "./chatbotKeywords";
 import { classificationValues, normalizeChatbotClassification, type ChatbotClassification } from "./chatbotClassification";
 import { streamChatbotReply } from "./useChatbotChat";
 import { createDeepWindowStore, type DeepWindowStore } from "./deepWindowStore";
+import { buildAnalyzeBody, buildClassifyBody } from "./report/reportRequests";
+import { createReportDataProvider } from "./report/reportDataProvider";
+import { resolveReportQuery } from "./report/reportQuery";
+import { runReportEngine } from "./report/reportEngine";
+import { buildMemoryRecommendation, createReportSnapshot } from "./report/reportSnapshots";
+import type { ReportBlock, ReportDataProvider, ReportDocument, ReportQuery, ReportRow, ReportSnapshot } from "./report/reportContracts";
+import { chatbotGuideHtml, chatbotHelpHtml, getUserGuideMarkdown, loadUserGuide } from "./chatbotHelp";
+import { createOnboardingState, initialOnboardingState, ONBOARDING_TOTAL, reduceOnboarding, type OnboardingState } from "./chatbotOnboardingModel";
 import type {
   ChatbotChatRunner,
   ChatbotDataSource,
@@ -34,6 +42,9 @@ export interface ChatbotSessionOptions {
   readonly offers: readonly Row[];
   readonly paymentRecords?: readonly Row[];
   readonly getProductKeywords?: () => unknown;
+  readonly productKeywords?: unknown;
+  readonly publishers?: unknown;
+  readonly reportProvider?: ReportDataProvider;
   readonly language: UiLanguage;
   readonly llmEnabled?: boolean;
   readonly enableQuestionLogging?: boolean;
@@ -72,11 +83,63 @@ type ChatbotMode = "report" | "chat";
 const MAX_HISTORY = 24;
 const MAX_MEMORY = 5;
 const SESSION_STORAGE_KEY = "oi_chat_session_v1";
-const REPORT_STARTERS: readonly ChatbotStarterCard[] = [
-  { id: "merchant", title: "Merchant", type: "merchant", questions: ["Show the latest merchant metrics", "Which metrics need attention?"] },
-  { id: "trend", title: "Trend", type: "trend", questions: ["Show the revenue trend", "Compare the last 3 months"] },
-  { id: "payment", title: "Payment", type: "payment", questions: ["Show unpaid payments", "Which payments are overdue?"] }
-];
+const ONBOARDING_STORAGE_KEY = "oi_onboarding_done";
+
+const STARTER_DEFINITIONS: Readonly<Record<string, {
+  readonly title: [string, string];
+  readonly type: [string, string];
+  readonly questions: readonly [string, string][];
+}>> = {
+  merchant: {
+    title: ["商户报告", "Merchant report"], type: ["商户", "merchant"],
+    questions: [["查看商户 EPC 和 AOV", "Show merchant EPC and AOV"], ["分析订单和点击表现", "Analyze orders and clicks"]]
+  },
+  category: {
+    title: ["品类报告", "Category report"], type: ["品类", "category"],
+    questions: [["比较 Electronics 品类表现", "Compare Electronics performance"], ["查看品类中的热门商户", "Show top merchants in the category"]]
+  },
+  tier: {
+    title: ["Tier 报告", "Tier report"], type: ["Tier", "tier"],
+    questions: [["查看 Tier 2 商户", "Show Tier 2 merchants"], ["比较各 Tier 的订单", "Compare orders by tier"]]
+  },
+  recommendation: {
+    title: ["推荐", "Recommendations"], type: ["推荐", "recommendation"],
+    questions: [["推荐 Electronics 中 EPC 大于 0.1 的 2 个商户", "Recommend 2 Electronics merchants with EPC above 0.1"], ["按销售额推荐商户", "Recommend merchants by revenue"]]
+  },
+  payment: {
+    title: ["付款报告", "Payment report"], type: ["付款", "payment"],
+    questions: [["查看 2026-08 Tier 2 未付款记录", "Show unpaid Tier 2 records for 2026-08"], ["哪些付款已逾期？", "Which payments are overdue?"]]
+  },
+  trend: {
+    title: ["趋势报告", "Trend report"], type: ["趋势", "trend"],
+    questions: [["查看近 3 个月销售额趋势", "Show the revenue trend for the last 3 months"], ["比较近 3 个月 EPC", "Compare EPC for the last 3 months"]]
+  },
+  keyword: {
+    title: ["关键词报告", "Keyword report"], type: ["关键词", "keyword"],
+    questions: [["查询 headphones 关键词关联的商品", "Find offers linked to the headphones keyword"], ["哪些产品关键词需要关注？", "Which product keywords need attention?"]]
+  },
+  publisher: {
+    title: ["Publisher Records", "Publisher Records"], type: ["媒体", "publisher"],
+    questions: [["查看 Publisher Records", "Show Publisher Records"], ["查看 Media One 的媒体画像", "Show the Media One publisher profile"]]
+  }
+};
+
+function reportStarterCards(language: UiLanguage, result: ChatbotSessionResult | null): readonly ChatbotStarterCard[] {
+  const currentIntent = result?.document?.intent || result?.report?.intent;
+  const keys = Object.keys(STARTER_DEFINITIONS);
+  const ordered = currentIntent && keys.includes(currentIntent)
+    ? [currentIntent, ...keys.filter((key) => key !== currentIntent)]
+    : keys;
+  return ordered.map((key) => {
+    const definition = STARTER_DEFINITIONS[key]!;
+    return {
+      id: key,
+      title: definition.title[language === "zh" ? 0 : 1],
+      type: definition.type[language === "zh" ? 0 : 1],
+      questions: definition.questions.map((question) => question[language === "zh" ? 0 : 1])
+    };
+  });
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -242,6 +305,7 @@ function zeroSummary(): ChatbotReportViewResult["summary"] {
 }
 
 function resultFromReport(report: ChatbotReportViewResult, status: Exclude<ChatbotSessionStatus, "idle" | "running"> = report.status === "resolved" || report.status === "ambiguous" ? "success" : "error"): ChatbotSessionResult {
+  const document = "documentId" in report ? report as unknown as ReportDocument : undefined;
   return {
     ok: status === "success",
     status,
@@ -250,7 +314,8 @@ function resultFromReport(report: ChatbotReportViewResult, status: Exclude<Chatb
     intent: report.intent,
     response: report.message,
     report,
-    reportSnapshot: { rows: report.rows, summary: report.summary, query: report.query },
+    reportSnapshot: document ? createReportSnapshot(document) : { rows: report.rows, summary: report.summary, query: report.query },
+    ...(document ? { document } : {}),
     ...(report.contentHtml ? { contentHtml: report.contentHtml } : {}),
     ...(report.recommendationHtml ? { recommendationHtml: report.recommendationHtml } : {})
   };
@@ -267,8 +332,66 @@ function resultFromChat(response: string, usage: ChatbotSessionResult["usage"], 
   };
 }
 
+function memoryRecommendationView(result: ChatbotSessionResult): ChatbotReportViewResult | null {
+  const recommendation = result.memoryRecommendation;
+  const snapshot = isRecord(result.reportSnapshot) && typeof result.reportSnapshot.snapshotId === "string"
+    ? result.reportSnapshot as unknown as ReportSnapshot
+    : null;
+  if (!recommendation || !snapshot) return null;
+  const summary = summarizeChatbotOffers(recommendation.selectedRows);
+  const status: ChatbotReportViewResult["status"] = recommendation.status === "ready"
+    ? "resolved"
+    : recommendation.status === "ambiguous" ? "ambiguous" : "not_found";
+  const rows = recommendation.selectedRows;
+  const selectedIds = new Set(recommendation.selectedMerchantIds);
+  const blocks: ReportBlock[] = snapshot.blocks.map((block) => block.kind === "notice"
+    ? block
+    : { ...block, rows: block.rows.filter((row) => selectedIds.has(text((row as Row).merchantId, 120))) });
+  if (!blocks.some((block) => block.kind !== "notice" && block.rows.length)) {
+    blocks.push({
+      id: "memory-recommendations",
+      kind: "table",
+      title: "Memory recommendations",
+      rows,
+      columns: []
+    });
+  }
+  const document: ReportDocument = {
+    intent: "recommendation",
+    title: "Memory recommendations",
+    status,
+    query: result.response,
+    source: snapshot.sourceInfo.kind,
+    rows,
+    summary,
+    message: result.response,
+    documentId: `memory-${snapshot.documentId}`,
+    request: { ...snapshot.request, intent: "recommendation", prompt: result.response, count: recommendation.requestedCount },
+    blocks,
+    sheets: recommendation.filteredSheets,
+    sourceInfo: {
+      ...snapshot.sourceInfo,
+      covered: recommendation.matchedCount,
+      requested: recommendation.requestedCount,
+      partial: recommendation.partial || snapshot.sourceInfo.partial
+    }
+  };
+  return { ...document, document, reportSnapshot: snapshot, sessionResult: result };
+}
+
+function recommendationHtml(response: string, language: UiLanguage): string {
+  const button = language === "zh" ? "下载推荐 Excel" : "Download recommendation Excel";
+  return `<div class="chatbot-memory-recommendation-body"><div>${renderMarkdownToHtml(response)}</div><button type="button" data-download-id="memory-recommendation">${button}</button></div>`;
+}
+
 function viewResultFromSession(result: ChatbotSessionResult, query: string): ChatbotReportViewResult {
-  if (result.report) return { ...result.report, sessionResult: result };
+  if (result.report) return {
+    ...result.report,
+    ...(isRecord(result.reportSnapshot) && typeof result.reportSnapshot.snapshotId === "string"
+      ? { reportSnapshot: result.reportSnapshot as unknown as ReportSnapshot }
+      : {}),
+    sessionResult: result
+  };
   return {
     intent: (result.intent || "analysis") as ChatbotReportViewResult["intent"],
     status: result.ok ? "resolved" : result.status === "stopped" ? "deferred" : "not_found",
@@ -279,25 +402,32 @@ function viewResultFromSession(result: ChatbotSessionResult, query: string): Cha
     message: result.response,
     sessionResult: result,
     ...(result.contentHtml ? { contentHtml: result.contentHtml } : {}),
-    ...(result.recommendationHtml ? { recommendationHtml: result.recommendationHtml } : {})
+    ...(result.recommendationHtml ? { recommendationHtml: result.recommendationHtml } : {}),
+    ...(isRecord(result.reportSnapshot) && typeof result.reportSnapshot.snapshotId === "string"
+      ? { reportSnapshot: result.reportSnapshot as unknown as ReportSnapshot }
+      : {})
   };
 }
 
 async function defaultClassify(prompt: string, categories: readonly string[], signal?: AbortSignal): Promise<unknown> {
+  const body = buildClassifyBody(prompt, categories);
+  if (!body) return null;
   return apiRequest<unknown>("/api/chat/classify", {
     method: "POST",
     signal,
-    body: JSON.stringify({ prompt: text(prompt, 2_048), categories: categories.slice(0, 200) })
+    body
   });
 }
 
 async function defaultAnalyze(summary: Readonly<Record<string, unknown>>, language: UiLanguage, signal?: AbortSignal): Promise<string | null> {
   try {
+    const body = buildAnalyzeBody(summary, language);
+    if (!body) return null;
     const payload = await apiRequest<unknown>("/api/chat/analyze", {
       method: "POST",
       signal,
       timeoutMs: 30_000,
-      body: JSON.stringify({ summary, language })
+      body
     });
     return isRecord(payload) && typeof payload.text === "string" ? payload.text.trim().slice(0, 24_000) || null : null;
   } catch {
@@ -332,6 +462,21 @@ function normalizeMemory(item: ChatbotMemoryItem): ChatbotMemoryItem | null {
   };
 }
 
+function memoryTextFromReport(view: ChatbotReportViewResult): string {
+  const summary = view.summary;
+  const summaryLine = `结果 ${summary.offerCount} 条；点击 ${summary.clicks}；订单 ${summary.orders}；销售额 ${summary.revenue.toFixed(2)}；佣金 ${summary.commission.toFixed(2)}；CVR ${summary.conversionRate === null ? "N/A" : `${(summary.conversionRate * 100).toFixed(2)}%`}`;
+  const rowLines = view.rows.slice(0, 8).map((row) => {
+    const source = row as Row;
+    const name = text(source.merchantName || source.brand || source.userName || source.merchantId || source.userId, 160) || "Unknown";
+    const id = text(source.merchantId || source.userId, 120);
+    const epc = numberValue(source.epc || source.affEpc);
+    const aov = numberValue(source.aov);
+    const status = text(source.paymentStatus || source.status, 80);
+    return [id && `${id} ${name}`, `EPC ${epc.toFixed(2)}`, `AOV ${aov.toFixed(2)}`, status].filter(Boolean).join(" | ");
+  });
+  return [view.message, summaryLine, ...rowLines].filter(Boolean).join("\n").slice(0, 8_000);
+}
+
 function safeMessage(value: unknown): ChatbotSessionMessage | null {
   if (!isRecord(value)) return null;
   const content = text(value.content);
@@ -347,6 +492,12 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
     onExport: (item) => options.downloadReport?.(item.result) || false
   });
   const offers = options.offers.slice();
+  const reportProvider = options.reportProvider || createReportDataProvider({
+    offers,
+    paymentRecords: options.paymentRecords,
+    keywords: options.productKeywords,
+    publishers: options.publishers
+  });
   const listeners = new Set<(state: ChatbotViewState) => void>();
   let mode: ChatbotMode = "report";
   let currentLanguage: UiLanguage = options.language;
@@ -359,10 +510,17 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
   let errorCode: string | null = null;
   let helpOpen = false;
   let guideOpen = false;
-  let onboardingOpen = false;
+  let onboardingDone = false;
+  try { onboardingDone = storage?.getItem(ONBOARDING_STORAGE_KEY) === "1"; } catch { onboardingDone = false; }
+  let onboardingState: OnboardingState = onboardingDone ? initialOnboardingState() : createOnboardingState(true, 0);
+  let helpHtml = chatbotHelpHtml(currentLanguage);
+  let guideHtml = chatbotGuideHtml(currentLanguage);
+  let guideLoading = false;
   let reminderVisible = false;
   let reminderCollapsed = false;
   let activeController: AbortController | null = null;
+  const refreshControllers = new Set<AbortController>();
+  let reportRevision = 0;
   let disposed = false;
   let currentQuestion: QuestionContext | null = null;
   const answerContexts = new Map<string, QuestionContext>();
@@ -378,17 +536,17 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
       history: history.slice(-MAX_HISTORY),
       messages: messages.slice(-MAX_HISTORY),
       memory: memory.map((item) => ({ ...item })),
-      starterCards: REPORT_STARTERS,
+      starterCards: reportStarterCards(currentLanguage, currentResult),
       currentResult,
       utility: {
         helpOpen,
         guideOpen,
-        helpHtml: "",
-        guideHtml: "",
-        guideLoading: false,
-        onboardingOpen,
-        onboardingStep: onboardingOpen ? 1 : 0,
-        onboardingTotal: 1,
+        helpHtml,
+        guideHtml,
+        guideLoading,
+        onboardingOpen: onboardingState.open,
+        onboardingStep: onboardingState.open ? onboardingState.step : 0,
+        onboardingTotal: ONBOARDING_TOTAL,
         reminderVisible,
         reminderCollapsed
       },
@@ -504,54 +662,93 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
     return nextResult;
   }
 
+  async function refreshReport(query: ReportQuery, previousResult: ChatbotSessionResult, revision: number): Promise<void> {
+    const refreshController = new AbortController();
+    refreshControllers.add(refreshController);
+    const linked = linkSignal(options.signal, refreshController.signal);
+    try {
+      const engineResult = await runReportEngine({
+        query,
+        language: currentLanguage,
+        offers,
+        paymentRecords: options.paymentRecords || extractPaymentRecords(offers),
+        productKeywords: options.productKeywords,
+        provider: reportProvider,
+        now: () => new Date(),
+        analyze: options.analyze || defaultAnalyze,
+        signal: linked.signal
+      });
+      if (disposed || reportRevision !== revision || currentResult !== previousResult) return;
+      const refreshed = resultFromReport(engineResult.view, engineResult.view.status === "resolved" || engineResult.view.status === "ambiguous" ? "success" : "error");
+      currentResult = {
+        ...refreshed,
+        ...(previousResult.answerId ? { answerId: previousResult.answerId } : {}),
+        ...(previousResult.feedbackState ? { feedbackState: previousResult.feedbackState } : {})
+      };
+      if (currentQuestion) currentQuestion = updateQuestionContext(currentQuestion, { result: currentResult, answer: currentResult.response });
+      notify();
+    } catch {
+      // 交互刷新失败时保留上一次已展示的报告，不让控件把结果清空。
+    } finally {
+      linked.dispose();
+      refreshControllers.delete(refreshController);
+    }
+  }
+
   async function submitReport(prompt: string, callbacks: ChatbotRunCallbacks, signal: AbortSignal): Promise<ChatbotSessionResult> {
+    let queryOffers: readonly Row[] = offers;
+    try {
+      const liveOffers = await reportProvider.offers(signal);
+      if (liveOffers.length) queryOffers = liveOffers;
+    } catch (error) {
+      if (isRecord(error) && error.name === "AbortError") throw error;
+      // 分类仍可使用 bootstrap/cache；报告引擎会再次复用同一提供器结果。
+    }
     let classification: ChatbotClassification | null = null;
     if (options.llmEnabled !== false) {
       try {
-        classification = normalizeChatbotClassification(await (options.classify || defaultClassify)(prompt, offerCategories(offers), signal));
+        classification = normalizeChatbotClassification(await (options.classify || defaultClassify)(prompt, offerCategories(queryOffers), signal));
       } catch {
         // 本地规则始终是确定性 fallback；LLM 分类失败不应清空报告。
       }
     }
 
     if (signal.aborted) return stoppedResult("report", source);
-    const reportOffers = mergeChatbotKeywords(offers, options.getProductKeywords?.());
-    let report: ChatbotReportViewResult = buildChatbotReport(prompt, { offers: reportOffers }, currentLanguage, classification);
-    const detectedIntent = report.intent;
-
-    if (detectedIntent === "payment") {
-      report = paymentReport(prompt, options.paymentRecords || extractPaymentRecords(offers), currentLanguage, classification);
-    } else if (detectedIntent === "analysis") {
-      const targets = classificationValues(classification?.params.analysisTargets);
-      if (!targets.length) targets.push(...classificationValues(classification?.params.analysisTarget));
-      const rows = targets.length
-        ? [...new Set(targets.flatMap((target) => {
-          const type = classification?.params.analysisType;
-          const targetClassification: ChatbotClassification | null = type === "merchant"
-            ? { intent: "merchant", params: { merchantName: target } }
-            : type === "category" ? { intent: "category", params: { category: [target] } }
-              : type === "tier" ? { intent: "tier", params: { tier: [target] } } : null;
-          return buildChatbotReport(target, { offers: reportOffers }, currentLanguage, targetClassification).rows;
-        }))]
-        : reportAnalysisRows(prompt, reportOffers);
-      const analysisText = await (options.analyze || defaultAnalyze)(
-        { ...summarizeChatbotOffers(rows), rows: rows.slice(0, 50), query: prompt },
-        currentLanguage,
-        signal
-      );
-      if (analysisText) {
-        report = {
-          ...report,
-          status: rows.length ? "resolved" : "not_found",
-          source: rows.length ? "cache" : "unavailable",
-          rows,
-          summary: summarizeChatbotOffers(rows),
-          message: analysisText,
-          contentHtml: renderMarkdownToHtml(analysisText)
-        };
-      }
-    }
-
+    const keywordPayload = options.getProductKeywords?.() ?? options.productKeywords;
+    const reportOffers = mergeChatbotKeywords(queryOffers, keywordPayload);
+    const previous = currentResult?.report?.document || currentResult?.document;
+    const query = resolveReportQuery(prompt, {
+      language: currentLanguage,
+      categories: offerCategories(queryOffers),
+      merchantCandidates: queryOffers.flatMap((offer) => {
+        const id = text(offer.merchantId || offer.merchant_id || offer.id, 120);
+        const name = text(offer.merchantName || offer.brand || offer.name, 200);
+        return id && name ? [{ id, name }] : [];
+      }),
+      classification,
+      ...(previous ? {
+        previous: {
+          intent: previous.intent,
+          merchantIds: previous.request.merchantIds,
+          merchantNames: previous.request.merchantNames,
+          category: previous.category,
+          tier: previous.tier,
+          request: previous.request
+        }
+      } : {})
+    });
+    const engineResult = await runReportEngine({
+      query,
+      language: currentLanguage,
+      offers: reportOffers,
+      paymentRecords: options.paymentRecords || extractPaymentRecords(queryOffers),
+      productKeywords: keywordPayload,
+      provider: reportProvider,
+      now: () => new Date(),
+      analyze: options.analyze || defaultAnalyze,
+      signal
+    });
+    const report = engineResult.view;
     if (signal.aborted) return stoppedResult("report", source);
     const result = resultFromReport(report, report.status === "resolved" || report.status === "ambiguous" ? "success" : report.status === "deferred" ? "stopped" : "error");
     callbacks.onChange?.(state());
@@ -564,6 +761,40 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
 
   async function submitChat(prompt: string, callbacks: ChatbotRunCallbacks, signal: AbortSignal): Promise<ChatbotSessionResult> {
     const previousHistory = history.slice(-MAX_HISTORY);
+    const memoryRecommendationRequested = /记忆|memory|报告/.test(prompt.toLowerCase()) && /推荐|recommend|挑选|选择/.test(prompt.toLowerCase());
+    if (memoryRecommendationRequested && memory.length) {
+      const snapshots = memory.flatMap((item): ReportSnapshot[] => {
+        const result = item.result;
+        if (!result || !("documentId" in result)) return [];
+        if (isRecord(result.reportSnapshot) && typeof result.reportSnapshot.snapshotId === "string") {
+          return [result.reportSnapshot as unknown as ReportSnapshot];
+        }
+        return [createReportSnapshot(result as unknown as ReportDocument)];
+      });
+      const recommendation = buildMemoryRecommendation(prompt, snapshots);
+      const response = recommendation.selectedRows.length
+        ? (currentLanguage === "zh"
+          ? `从报告记忆中选出 ${recommendation.selectedRows.length} 个商户：${recommendation.selectedRows.map((row) => String((row as Row).merchantName || (row as Row).brand || (row as Row).merchantId || "未知商户")).join("、")}。`
+          : `Selected ${recommendation.selectedRows.length} merchants from report memory: ${recommendation.selectedRows.map((row) => String((row as Row).merchantName || (row as Row).brand || (row as Row).merchantId || "Unknown")).join(", ")}.`)
+        : (currentLanguage === "zh" ? "报告记忆中没有符合条件的推荐结果。" : "No matching recommendation was found in report memory.");
+      messages = [
+        ...messages,
+        { role: "user", content: prompt } satisfies ChatbotSessionMessage,
+        { role: "assistant", content: response } satisfies ChatbotSessionMessage
+      ];
+      history = [
+        ...previousHistory,
+        { role: "user", content: prompt } satisfies ChatbotSessionMessage,
+        { role: "assistant", content: response } satisfies ChatbotSessionMessage
+      ].slice(-MAX_HISTORY);
+      callbacks.onChange?.(state());
+      return {
+        ...resultFromChat(response, null, "success"),
+        memoryRecommendation: recommendation,
+        reportSnapshot: snapshots.find((snapshot) => snapshot.snapshotId === recommendation.sourceSnapshotId) || undefined,
+        recommendationHtml: recommendationHtml(response, currentLanguage)
+      };
+    }
     messages = [
       ...messages,
       { role: "user", content: prompt } satisfies ChatbotSessionMessage,
@@ -618,12 +849,16 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
     if (!query) return { ok: false, status: "error", mode, source, response: "", errorCode: "empty_prompt" };
     if (disposed || status === "running") return { ok: false, status: "error", mode, source, response: "", errorCode: "busy" };
     const linked = linkSignal(options.signal, callbacks.signal);
+    reportRevision += 1;
     activeController = new AbortController();
     const bridge = linkSignal(linked.signal, activeController.signal);
     const question = beginQuestion(query, mode);
     errorCode = null;
-    currentResult = null;
     setState("running");
+    if (mode === "report") {
+      onboardingState = reduceOnboarding(onboardingState, "report-submitted");
+      notify();
+    }
     try {
       const rawResult = mode === "report"
         ? await submitReport(query, callbacks, bridge.signal)
@@ -634,6 +869,8 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
         await completeQuestionFor(question, "failed");
       } else {
         currentResult = result;
+        if (result.mode === "report" && result.ok) onboardingState = reduceOnboarding(onboardingState, "report-ready");
+        if (result.mode === "chat" && result.ok && memory.length) onboardingState = reduceOnboarding(onboardingState, "chat-submitted");
         setQuestionAnswer(result.response, question);
         if (result.mode === "chat" && result.answerId) {
           const answerId = result.answerId;
@@ -747,18 +984,24 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
   }
 
   function addMemory(result: ChatbotSessionResult | ChatbotReportViewResult): boolean {
-    const view = "mode" in result ? viewResultFromSession(result, result.response) : result;
+    const baseView = "mode" in result ? viewResultFromSession(result, result.response) : result;
+    const view = isRecord(baseView.reportSnapshot) && typeof baseView.reportSnapshot.snapshotId === "string"
+      ? baseView
+      : baseView.document
+        ? { ...baseView, reportSnapshot: createReportSnapshot(baseView.document) }
+        : baseView;
     if (!view.message && !view.contentHtml) return false;
     const item = normalizeMemory({
       id: uuid("memory"),
       title: text(view.title || view.category || view.tier || view.intent, 200) || "Report",
-      text: text(view.message || view.contentHtml, 8_000),
+      text: memoryTextFromReport(view),
       ...(view.contentHtml ? { html: view.contentHtml } : {}),
       source: view.source,
       result: view
     });
     if (!item) return false;
     memory = [...memory.filter((entry) => entry.result?.query !== view.query), item].slice(-MAX_MEMORY);
+    onboardingState = reduceOnboarding(onboardingState, "memory-added");
     syncReminder();
     notify();
     return true;
@@ -772,6 +1015,9 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
 
   function clearConversation(): void {
     if (status === "running") return;
+    reportRevision += 1;
+    refreshControllers.forEach((controller) => controller.abort());
+    refreshControllers.clear();
     history = [];
     messages = [];
     memory = [];
@@ -781,6 +1027,7 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
     questionCompletions.clear();
     errorCode = null;
     status = "idle";
+    onboardingState = reduceOnboarding(onboardingState, "clear");
     syncReminder();
     notify();
   }
@@ -840,10 +1087,17 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
     return deepWindowId;
   }
 
-  function downloadRecommendation(downloadId: string): boolean {
-    const downloaded = options.downloadRecommendation?.(text(downloadId, 120), currentResult) || false;
-    if (downloaded || !currentResult) return downloaded;
-    return options.downloadReport?.(viewResultFromSession(currentResult, currentResult.response)) || false;
+  function downloadRecommendation(downloadId: string, answerId?: string): boolean {
+    const targetResult = answerId ? answerContexts.get(text(answerId, 120))?.result || null : currentResult;
+    const downloaded = options.downloadRecommendation?.(text(downloadId, 120), targetResult) || false;
+    if (downloaded || !targetResult) return downloaded;
+    if (targetResult.memoryRecommendation) {
+      if (targetResult.memoryRecommendation.status !== "ready") return false;
+      const recommendationView = memoryRecommendationView(targetResult);
+      if (recommendationView) return options.downloadReport?.(recommendationView) || false;
+      return false;
+    }
+    return options.downloadReport?.(viewResultFromSession(targetResult, targetResult.response)) || false;
   }
 
   function downloadOverview(): boolean {
@@ -867,6 +1121,8 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
 
   function setLanguage(nextLanguage: UiLanguage): void {
     currentLanguage = nextLanguage === "en" ? "en" : "zh";
+    helpHtml = chatbotHelpHtml(currentLanguage);
+    guideHtml = chatbotGuideHtml(currentLanguage);
     notify();
   }
 
@@ -874,6 +1130,20 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
     if (nextMode !== "report" && nextMode !== "chat") return;
     mode = nextMode;
     syncReminder();
+    notify();
+  }
+
+  function replaceCurrentReport(document: ReportDocument): void {
+    if (!currentResult) return;
+    currentResult = {
+      ...currentResult,
+      report: document,
+      document,
+      response: document.message,
+      source: document.source,
+      reportSnapshot: createReportSnapshot(document)
+    };
+    if (currentQuestion) currentQuestion = updateQuestionContext(currentQuestion, { result: currentResult, answer: document.message });
     notify();
   }
 
@@ -887,6 +1157,66 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
       if (!reminderVisible) return false;
       reminderCollapsed = !reminderCollapsed;
       notify();
+      return true;
+    }
+    const activeReport = currentResult?.document || (currentResult?.report && "documentId" in currentResult.report ? currentResult.report as unknown as ReportDocument : null);
+    if (activeReport && ["trend-metric", "trend-category", "trend-column-toggle", "trend-column-core", "trend-column-all", "trend-columns", "payment-month", "select-merchant", "select-publisher", "exclude-merchant", "replace-merchant"].includes(normalized)) {
+      const trendBlock = activeReport.blocks.find((block) => block.kind === "trend");
+      if (trendBlock && normalized === "trend-columns") {
+        const available = new Set(trendBlock.columns.map((column) => column.key));
+        const visibleColumns = Array.from(new Set(String(value || "").split(",").map((column) => column.trim()).filter((column) => available.has(column))));
+        if (!visibleColumns.length) return false;
+        const sheets = activeReport.sheets.map((sheet) => sheet.name === trendBlock.title
+          ? { ...sheet, columns: sheet.columns.filter((column) => visibleColumns.includes(column.key)) }
+          : sheet);
+        replaceCurrentReport({
+          ...activeReport,
+          blocks: activeReport.blocks.map((block) => block.id === trendBlock.id ? { ...block, visibleColumns } : block),
+          sheets
+        });
+        return true;
+      }
+      if (trendBlock && ["trend-column-toggle", "trend-column-core", "trend-column-all"].includes(normalized)) {
+        const core = trendBlock.columns.slice(0, 3).map((column) => column.key);
+        const all = trendBlock.columns.map((column) => column.key);
+        const visibleColumns = normalized === "trend-column-core"
+          ? core
+          : normalized === "trend-column-all"
+            ? all
+            : trendBlock.visibleColumns.length === all.length ? core : all;
+        const nextDocument: ReportDocument = {
+          ...activeReport,
+          blocks: activeReport.blocks.map((block) => block.id === trendBlock.id ? { ...block, visibleColumns } : block)
+        };
+        replaceCurrentReport(nextDocument);
+        return true;
+      }
+      const nextQuery: ReportQuery = normalized === "trend-metric"
+        ? { ...activeReport.request, intent: "analysis", analysisType: "trend", trendMetric: value as ReportQuery["trendMetric"] }
+        : normalized === "trend-category"
+          ? { ...activeReport.request, intent: "analysis", analysisType: "trend", categories: value ? [value] : [] }
+          : normalized === "payment-month"
+            ? { ...activeReport.request, intent: "payment", month: value || activeReport.request.month }
+            : normalized === "select-publisher"
+              ? { ...activeReport.request, intent: "publisherprofile", publisherQuery: value || activeReport.request.publisherQuery }
+              : normalized === "exclude-merchant"
+                ? {
+                    ...activeReport.request,
+                    intent: "recommendation",
+                    excludeMerchantIds: Array.from(new Set([...activeReport.request.excludeMerchantIds, ...(value ? [value] : [])]))
+                  }
+                : normalized === "replace-merchant"
+                  ? {
+                      ...activeReport.request,
+                      intent: "recommendation",
+                      excludeMerchantIds: Array.from(new Set([...activeReport.request.excludeMerchantIds, ...(value ? [value] : [])])),
+                      replaceMerchantIds: Array.from(new Set([...activeReport.request.replaceMerchantIds, ...(value ? [value] : [])]))
+                    }
+              : { ...activeReport.request, intent: "merchant", merchantIds: value ? [value] : activeReport.request.merchantIds };
+      const previousResult = currentResult;
+      if (!previousResult) return false;
+      const revision = ++reportRevision;
+      void refreshReport(nextQuery, previousResult, revision);
       return true;
     }
     if (["trend-metric", "trend-category", "trend-column-toggle", "trend-column-core", "trend-column-all"].includes(normalized)) {
@@ -915,18 +1245,65 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
 
   function toggleGuide(): boolean {
     guideOpen = !guideOpen;
+    if (guideOpen) {
+      guideLoading = true;
+      notify();
+      void loadUserGuide(currentLanguage)
+        .then((markdown) => {
+          if (disposed) return;
+          guideHtml = renderMarkdownToHtml(markdown || getUserGuideMarkdown(currentLanguage));
+        })
+        .catch(() => {
+          if (!disposed) guideHtml = chatbotGuideHtml(currentLanguage);
+        })
+        .finally(() => {
+          if (!disposed) {
+            guideLoading = false;
+            notify();
+          }
+        });
+      return guideOpen;
+    }
+    guideLoading = false;
     notify();
     return guideOpen;
   }
 
   function startOnboarding(): boolean {
-    onboardingOpen = !onboardingOpen;
+    onboardingState = createOnboardingState(true, 0);
     notify();
-    return onboardingOpen;
+    return onboardingState.open;
+  }
+
+  function nextOnboarding(): boolean {
+    if (onboardingState.step >= ONBOARDING_TOTAL - 1) {
+      onboardingDone = true;
+      try { storage?.setItem(ONBOARDING_STORAGE_KEY, "1"); } catch { /* storage unavailable */ }
+      onboardingState = reduceOnboarding(onboardingState, "done");
+    } else {
+      onboardingState = reduceOnboarding(onboardingState, "next");
+    }
+    notify();
+    return onboardingState.open;
+  }
+
+  function backOnboarding(): boolean {
+    onboardingState = reduceOnboarding(onboardingState, "back");
+    notify();
+    return onboardingState.open;
+  }
+
+  function skipOnboarding(): boolean {
+    onboardingDone = true;
+    try { storage?.setItem(ONBOARDING_STORAGE_KEY, "1"); } catch { /* storage unavailable */ }
+    onboardingState = reduceOnboarding(onboardingState, "skip");
+    notify();
+    return onboardingState.open;
   }
 
   function stop(): void {
     activeController?.abort();
+    refreshControllers.forEach((controller) => controller.abort());
   }
 
   function dispose(): void {
@@ -934,6 +1311,8 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
     disposed = true;
     activeController?.abort();
     activeController = null;
+    refreshControllers.forEach((controller) => controller.abort());
+    refreshControllers.clear();
     listeners.clear();
     answerContexts.clear();
     questionCompletions.clear();
@@ -962,6 +1341,9 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
     toggleHelp,
     toggleGuide,
     startOnboarding,
+    nextOnboarding,
+    backOnboarding,
+    skipOnboarding,
     stop,
     dispose
   };

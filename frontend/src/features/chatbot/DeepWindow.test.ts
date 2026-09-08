@@ -42,9 +42,9 @@ describe("DeepWindow", () => {
     expect(wrapper.find('[data-deep-window-action="export"]').exists()).toBe(true);
     expect(wrapper.find('[data-deep-window-action="minimize"]').exists()).toBe(true);
     expect(wrapper.find('[data-deep-window-action="close"]').exists()).toBe(true);
-    expect(wrapper.find('[data-deep-window-action="pin"]').exists()).toBe(false);
-    expect(wrapper.find('[data-deep-window-action="clone"]').exists()).toBe(false);
-    expect(wrapper.find('[data-deep-window-action="overlay"]').exists()).toBe(false);
+    expect(wrapper.find('[data-deep-window-action="pin"]').exists()).toBe(true);
+    expect(wrapper.find('[data-deep-window-action="clone"]').exists()).toBe(true);
+    expect(wrapper.find('[data-deep-window-action="overlay"]').exists()).toBe(true);
     expect(wrapper.get('[data-deep-window-header]').attributes("data-draggable")).toBe("true");
 
     await wrapper.get('[data-deep-window-action="export"]').trigger("click");

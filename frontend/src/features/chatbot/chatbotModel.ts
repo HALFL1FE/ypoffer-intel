@@ -127,6 +127,9 @@ export function detectChatbotIntent(
   const textValue = text(prompt);
   const lower = textValue.toLowerCase();
   const combined = lower + textValue;
+  if (/^\s*\/?(?:help|帮助|使用说明|怎么用|如何使用|what\s+can\s+you\s+do)\b/i.test(textValue)) {
+    return "help";
+  }
   if (/\bB0[A-Z0-9]{8}\b/i.test(textValue) || /\basin\b/i.test(lower) || /亚马逊商品编号|商品编号/.test(textValue)) {
     return "asin";
   }
