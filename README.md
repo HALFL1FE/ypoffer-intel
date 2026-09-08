@@ -6,14 +6,14 @@ Internal YeahPromos Amazon offer intelligence dashboard for offer ranking, categ
 
 ## What Is Included
 
-- Static dashboard UI in `public/`.
+- Standalone Vue 3 dashboard in `frontend/`, built to `public/assets/modern/`; `public/` contains only the authentication/bootstrap shell.
 - Cached browser payloads in `protected_data/` (committed DB API cache files):
   - `protected_data/db_offers_cache.json`
   - `protected_data/db_keywords_cache.json`
   - `protected_data/db_publishers_cache.json`
 - Google Sheet and Feishu category intelligence for main-category and subcategory search.
 - Recommendation chatbot with English and Chinese prompt support.
-- Tier 2 publisher recommendation rules in `public/tier2_recommendation_rules.js`.
+- Tier and publisher recommendation behavior in the typed Vue feature models and Python Agent tool registry.
 - Tier sheet category-wise reporting and multi-sheet XLSX exports.
 - Levanta payment API helpers in `server.py` and `api/levanta/payments.py`.
 - Read-only Offer DB API helpers in `offer_db.py` and `api/db/`.
@@ -25,7 +25,7 @@ Internal YeahPromos Amazon offer intelligence dashboard for offer ranking, categ
 
 ### Database Migration Path
 
-The dashboard uses a hybrid migration path: MySQL is the server-side source of truth, while the browser loads committed payloads only after the admin session is validated. Browser code must not connect to MySQL directly.
+The dashboard uses a hybrid migration path: MySQL is the server-side source of truth, while the browser loads committed payloads only after the current user session is validated. Browser code must not connect to MySQL directly.
 
 - Reporting views/tables are limited to `oi_*` objects.
 - Static snapshots can be built with `scripts/build_db_static_snapshot.py`.
@@ -38,26 +38,38 @@ The dashboard uses a hybrid migration path: MySQL is the server-side source of t
 - Local UI preview without DB env can use `http://127.0.0.1:8765/?dbStatusDemo=1`; this demo mode only activates on localhost.
 - Full setup details are in `docs/offer-db-migration.md`.
 
-### Admin Login
+### User Authentication and Page Access
 
-The app has a single administrator login. There is no user registration or role table. A successful login receives an `HttpOnly` signed session cookie and has full dashboard permissions.
+The app authenticates users from `cnpscy_oi_user`, using each row's `username`, `password_hash`, `is_active`, and `level`. There is no registration, user-management page, or role-management page; deployment operators create and maintain users in the database. A successful login receives an `HttpOnly` signed v2 session cookie containing only `v`, `sub`, `exp`, and `iat`. Every protected request re-reads the user row, so changes to `is_active` or `level` take effect on the next request.
+
+Access levels are fixed: level 0 can access all 12 pages; level 1 can access every page except Google Ads; level 2 can access only Google Ads and starts there. Unauthenticated requests return 401, an invalid level or denied page returns 403, and missing or unavailable authentication dependencies return 503.
 
 Required environment variables:
 
 ```text
 OI_AUTH_ENABLED=1
-OI_ADMIN_USERNAME=admin
-OI_ADMIN_PASSWORD_HASH=<pbkdf2_sha256 hash>
 OI_SESSION_SECRET=<random long secret>
+OFFER_DB_HOST=<database host>
+OFFER_DB_NAME=<database name>
+OFFER_DB_USER=<database user>
+OFFER_DB_PASSWORD=<database password>
+OFFER_DB_API_TOKEN=<server-only database API token>
 ```
 
 Generate the password hash locally:
 
 ```bash
-python scripts/hash_auth_password.py
+python -m scripts.hash_auth_password
 ```
 
-The login protects `/api/levanta/payments`, `/api/tier_moves`, `/api/ui/db/*`, and the browser payload endpoint `/api/auth/data`. The generated payload files stay outside `public/` so direct static downloads do not bypass the login screen.
+The login protects `/api/levanta/payments`, `/api/tier_moves`, `/api/ui/db/*`, Chat/Agent endpoints, and the CopilotKit/Python AG-UI path. Level 2 is limited to `/api/ui/db/google-ads-workbench`; the generated payload files stay outside `public/` so direct static downloads do not bypass the login screen.
+
+Production cutover order:
+
+1. Create `cnpscy_oi_user` and insert the initial level 0 user with a locally generated PBKDF2 hash.
+2. Deploy the application code.
+3. Set `OI_AUTH_ENABLED=1`, `OI_SESSION_SECRET`, and the `OFFER_DB_*` connection variables.
+4. Remove obsolete authentication configuration and verify login, level 0/1/2 page access, and old-cookie rejection before opening traffic.
 
 Scheduled payment syncs can call the protected `/api/levanta/payments` endpoint without a browser session by setting the same `PAYMENT_SYNC_TOKEN` in Vercel and as a GitHub Actions repository secret. The sync script sends it as a bearer token when `PAYMENT_SYNC_SOURCE_URL` is configured.
 
@@ -87,7 +99,7 @@ Each tier page (`Tier 1`, `Tier 2`, `Tier 3`, `Tier 4`, and `BLACK TIER`) render
 - Tier XLSX downloads include the selected tier sheet plus a `Category Summary` sheet.
 - Tier XLSX downloads also include an `Offer List` sheet with `Merchant ID`, `Merchant Name`, `Category`, and `Avg Commission Rate`.
 - `Avg Commission Rate` is rounded up to a whole percentage for export.
-- Tier row colors prefer `visualStatusColor` fields when present, then fall back to legacy tier rules.
+- Tier row colors prefer `visualStatusColor` fields when present, then use the typed Vue tier rules.
 
 ### Dashboard Category Report
 
@@ -138,7 +150,7 @@ Tier 2 recommendations read publisher counts such as `14/20` as `14 of 20 publis
 
 Payment records come from Levanta invoice data and should be attributed to Levanta merchant IDs when the same brand also has a direct offer in the system.
 
-- Live sync in `server.py`, static data generation in `scripts/build_offer_chatbot_data.rb`, and browser normalization in `public/app.js` prefer exact Levanta-network offer matches for Levanta payment rows.
+- Live sync in `server.py`, static data generation in `scripts/build_offer_chatbot_data.rb`, and the Vue payment model prefer exact Levanta-network offer matches for Levanta payment rows.
 - If Levanta provides a brand UUID, the dashboard keeps it as `levantaBrandId` while displaying the matched internal Levanta merchant ID.
 - Direct offers with the same brand name do not inherit Levanta payment status or sales.
 - RENPHO Group payment rows map to Levanta MID `362938`; RENPHO Wellness payment rows map to Levanta MID `363199`.
@@ -215,9 +227,11 @@ export LEVANTA_API_KEY="your_levanta_api_key"
 export TIER_MOVES_WEBHOOK_URL="your_apps_script_web_app_url"
 export TIER_MOVES_WEBHOOK_SECRET="your_shared_secret"
 export OFFER_DB_API_TOKEN="your_internal_db_api_token"
+export OFFER_DB_HOST="your_database_host"
+export OFFER_DB_NAME="your_database_name"
+export OFFER_DB_USER="your_database_user"
+export OFFER_DB_PASSWORD="your_database_password"
 export OI_AUTH_ENABLED=1
-export OI_ADMIN_USERNAME="admin"
-export OI_ADMIN_PASSWORD_HASH="your_pbkdf2_sha256_hash"
 export OI_SESSION_SECRET="your_random_session_secret"
 export PAYMENT_SYNC_TOKEN="your_random_payment_sync_token"
 python3 server.py
@@ -230,9 +244,11 @@ $env:LEVANTA_API_KEY="your_levanta_api_key"
 $env:TIER_MOVES_WEBHOOK_URL="your_apps_script_web_app_url"
 $env:TIER_MOVES_WEBHOOK_SECRET="your_shared_secret"
 $env:OFFER_DB_API_TOKEN="your_internal_db_api_token"
+$env:OFFER_DB_HOST="your_database_host"
+$env:OFFER_DB_NAME="your_database_name"
+$env:OFFER_DB_USER="your_database_user"
+$env:OFFER_DB_PASSWORD="your_database_password"
 $env:OI_AUTH_ENABLED="1"
-$env:OI_ADMIN_USERNAME="admin"
-$env:OI_ADMIN_PASSWORD_HASH="your_pbkdf2_sha256_hash"
 $env:OI_SESSION_SECRET="your_random_session_secret"
 $env:PAYMENT_SYNC_TOKEN="your_random_payment_sync_token"
 python server.py
@@ -282,10 +298,19 @@ Run the same checks used by CI:
 
 ```bash
 node --check public/auth.js
-node --check public/app.js
-node --check public/chatbot_i18n.js
-node --check public/tier2_recommendation_rules.js
+node --check public/page_access.js
+npm run test:copilotkit
+node scripts/test_page_access.mjs
+node scripts/test_legacy_page_access.mjs
+npm ci
+npm run test:copilotkit
+npm --prefix frontend ci
+npm --prefix frontend run typecheck
+npm --prefix frontend run test -- --run
+npm --prefix frontend run build
 python scripts/test_auth_helpers.py
+python scripts/test_offer_db_user_lookup.py
+python scripts/test_page_access_routes.py
 python scripts/test_vercel_function_budget.py
 python scripts/test_vercel_db_wsgi.py
 python scripts/test_vercel_auth_routes.py
@@ -294,11 +319,14 @@ python scripts/test_vercel_payment_packaging.py
 python scripts/test_llm_stream_timeout.py
 # after `vercel build --prod`
 python scripts/test_vercel_build_output.py
-node scripts/test_chatbot_intent_flow.mjs
-node scripts/test_tier2_recommendation_rules.mjs
+node scripts/test_frontend_migration_inventory.mjs
+node scripts/test_frontend_build_contract.mjs
+node scripts/test_m4_shell_frontend.mjs
+node scripts/test_modern_page_cutover.mjs
+node scripts/test_m6_chatbot_agent_behavior_parity.mjs
+node scripts/test_m6_modern_mount.mjs
+node scripts/test_m7_modern_entry.mjs
 node scripts/test_sheet_categories.mjs
-node scripts/test_tier_visual_status.mjs
-node scripts/test_zh_chatbot.mjs
 python -m scripts.test_payment_placeholders
 python -m py_compile auth.py server.py offer_db.py levanta_payments.py api/auth/index.py api/chat/actions.py api/chat/stream.py api/db/index.py api/levanta/payments.py api/tier_moves.py scripts/validate_db_migration.py
 ```
@@ -307,6 +335,6 @@ python -m py_compile auth.py server.py offer_db.py levanta_payments.py api/auth/
 
 Do not commit `.env`, API keys, database passwords, logs, or PID files. Server secrets must stay in deployment environment variables only.
 
-Do not commit `OI_ADMIN_PASSWORD`, `OI_ADMIN_PASSWORD_HASH`, `OI_SESSION_SECRET`, or `PAYMENT_SYNC_TOKEN` outside deployment configuration. Prefer `OI_ADMIN_PASSWORD_HASH` over plaintext `OI_ADMIN_PASSWORD`.
+Do not commit passwords, password hashes, `OI_SESSION_SECRET`, database credentials, or `PAYMENT_SYNC_TOKEN` outside deployment configuration. Generate a user password hash locally with `python -m scripts.hash_auth_password` and write only the resulting hash to the deployment-managed `cnpscy_oi_user` row.
 
-The production DB user for this app should be read-only and limited to `SELECT` on `oi_*` objects. Do not expose or migrate user, site, bank, login-log, payment-callback, link-tracking, or raw network integration tables into browser payloads or API responses.
+The production DB user for this app should be read-only and limited to the required `SELECT` permissions on `cnpscy_oi_user` and `oi_*` objects. Do not expose or migrate user, site, bank, login-log, payment-callback, link-tracking, or raw network integration tables into browser payloads or API responses.

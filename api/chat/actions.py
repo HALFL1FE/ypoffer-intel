@@ -1,11 +1,12 @@
 from http.server import BaseHTTPRequestHandler
 
-from auth import _read_json_body, require_auth, send_json
+from auth import _read_json_body, require_page_access, send_json
 from chat_agent_http import handle_agent_request
+from agent_agui import handle_agui_request
 from llm_classify import classify_intent, generate_analysis_text
 
 
-CHAT_ROUTES = {"analyze", "classify", "agent"}
+CHAT_ROUTES = {"analyze", "classify", "agent", "agui"}
 
 
 def handle_analyze(target):
@@ -69,6 +70,10 @@ def dispatch_request(target, method, route):
         send_json(target, 404, {"ok": False, "error": "Unknown chat route"})
         return
 
+    if route == "agui":
+        handle_agui_request(target, method)
+        return
+
     if method == "OPTIONS":
         send_json(target, 204, {})
         return
@@ -77,7 +82,7 @@ def dispatch_request(target, method, route):
         send_json(target, 405, {"ok": False, "error": "Method not allowed"})
         return
 
-    if not require_auth(target):
+    if not require_page_access(target, "agent" if route == "agent" else "dashboard"):
         return
 
     if route == "classify":

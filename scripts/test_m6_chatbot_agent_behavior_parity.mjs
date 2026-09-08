@@ -1,0 +1,30 @@
+import fs from "node:fs";
+import path from "node:path";
+
+const read = (...parts) => fs.readFileSync(path.join(process.cwd(), ...parts), "utf8");
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const entry = read("frontend", "src", "entry.ts");
+const chatbotSession = read("frontend", "src", "features", "chatbot", "chatbotSession.ts");
+const chatbotPage = read("frontend", "src", "features", "chatbot", "ChatbotPage.vue");
+const chatView = read("frontend", "src", "features", "chatbot", "ChatbotChatView.vue");
+const deepWindow = read("frontend", "src", "features", "chatbot", "DeepWindow.vue");
+const deepWindowStore = read("frontend", "src", "features", "chatbot", "deepWindowStore.ts");
+const agentSession = read("frontend", "src", "features", "agent", "agentSession.ts");
+const agentPage = read("frontend", "src", "features", "agent", "AgentPage.vue");
+const agentHost = read("frontend", "src", "features", "agent", "CopilotKitAgentHost.vue");
+
+assert(/createChatbotSession/.test(entry) && /createAgentSession/.test(entry), "Modern factory 必须创建独立 Chatbot/Agent session");
+assert(!/OI_LEGACY_BRIDGE|legacy\/bridge/.test(entry + chatbotSession + agentSession + agentHost), "Modern Chatbot/Agent 不得读取旧 bridge");
+assert(/toolExecutor/.test(agentHost) && /executeTool:\s*executeFrontendTool/.test(agentSession), "CopilotKit 工具必须使用独立 Agent executor");
+assert(/downloadOverview/.test(chatbotSession + chatbotPage) && /downloadChatbotReport/.test(entry), "Modern 报告必须保留 XLSX 下载");
+assert(/data-deep-window-action="export"/.test(deepWindow) && /onExport/.test(deepWindowStore), "Deep Window 必须保留导出");
+assert(/starterCards|starter-prompt/.test(chatbotSession + chatView + chatbotPage), "Chat Mode 必须保留 starter questions");
+assert(/operation=feedback/.test(chatbotSession + agentSession), "Chatbot/Agent 必须保留反馈 API");
+assert(/downloadLogs/.test(chatbotSession + agentSession + chatbotPage + agentPage), "Chatbot/Agent 必须保留日志下载");
+assert(/toggleHelp/.test(chatbotSession + chatbotPage) && /toggleGuide/.test(chatbotSession + chatbotPage), "Chatbot 必须保留帮助和指南");
+assert(/onTimeline/.test(agentPage + agentSession), "Agent 必须保留 timeline callback");
+assert(/memoryText/.test(agentSession), "Agent Runtime 必须继续携带结构化 Memory");
+assert(/trend-interact|setTrendColumns/.test(deepWindow + deepWindowStore), "Deep Window 必须保留趋势控件");
+assert(/renderMarkdownToHtml/.test(agentPage), "Agent 必须使用受控 Markdown renderer");
+assert(/dashboard:\s*chatbotFactory/.test(entry) && /agent:\s*agentFactory/.test(entry), "Chatbot/Agent factory 必须注册");
+console.log("PASS: M6 behavior remains in the modern runtime");
