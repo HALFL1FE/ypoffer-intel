@@ -8,6 +8,15 @@ import {
   type TrackedOffer,
 } from "./performanceModel";
 import type { UiLanguage } from "../../shared/i18n";
+import {
+  categoryStyle,
+  linkKind,
+  linkLabel,
+  ASIN_SCOPES,
+  asinScope,
+  asinScopeLabel,
+  type AsinScope,
+} from "./promotionAppearance";
 
 const props = defineProps<{
   language: UiLanguage;
@@ -28,6 +37,7 @@ const mode = ref<"merchants" | "products">("merchants"),
   period = ref("both"),
   sort = ref<Metric>("revenue"),
   limit = ref(40);
+const scopeFilter = ref<AsinScope | "all">("all");
 const labels: Record<Metric, [string, string]> = {
   revenue: ["营收", "Revenue"],
   clicks: ["点击", "Clicks"],
@@ -47,7 +57,9 @@ const relationships = computed(
     (mode.value === "merchants" ? props.report?.media : props.report?.links) ||
     [],
 );
-const rows = computed(() =>
+const scopeFor = (row: MediaRow) =>
+  asinScope(row, offersById.value.get(row.merchantId));
+const candidateRows = computed(() =>
   relationships.value
     .filter(
       (r) =>
@@ -67,6 +79,14 @@ const rows = computed(() =>
         ((period.value === "before" ? a.before : a.after)[sort.value] ??
           -Infinity),
     ),
+);
+const rows = computed(() =>
+  candidateRows.value.filter(
+    (row) =>
+      mode.value !== "products" ||
+      scopeFilter.value === "all" ||
+      scopeFor(row) === scopeFilter.value,
+  ),
 );
 const merchants = computed(
   () => new Set(rows.value.map((r) => r.merchantId)).size,
@@ -103,7 +123,7 @@ function format(value: number | null, metric: Metric) {
           metric === "revenue" || metric === "commission" ? 2 : 0,
       }).format(value);
 }
-watch([mode, search, merchant, period], () => {
+watch([mode, search, merchant, period, scopeFilter], () => {
   limit.value = 40;
 });
 watch(
@@ -201,6 +221,31 @@ watch(
         </select></label
       >
     </div>
+    <div
+      v-if="mode === 'products'"
+      class="promotion-scope-filters"
+      role="group"
+      :aria-label="t('关系单品范围', 'Relationship product scope')"
+    >
+      <button
+        type="button"
+        :aria-pressed="scopeFilter === 'all'"
+        @click="scopeFilter = 'all'"
+      >
+        {{ t("全部目标", "All targets") }} · {{ candidateRows.length }}
+      </button>
+      <button
+        v-for="scope in ASIN_SCOPES"
+        :key="scope"
+        type="button"
+        :data-asin-scope="scope"
+        :aria-pressed="scopeFilter === scope"
+        @click="scopeFilter = scope"
+      >
+        {{ asinScopeLabel(scope, language) }} ·
+        {{ candidateRows.filter((row) => scopeFor(row) === scope).length }}
+      </button>
+    </div>
     <p v-if="loading" role="status">
       {{
         t(
@@ -296,14 +341,23 @@ watch(
                   class="promotion-relation-path"
                   :class="{ 'has-product': mode === 'products' }"
                 >
-                  <div class="promotion-relation-node">
+                  <div
+                    class="promotion-relation-node promotion-brand"
+                    :style="
+                      categoryStyle(offersById.get(r.merchantId)?.category)
+                    "
+                  >
                     <small>{{ t("商家", "Merchant") }}</small
                     ><button
                       type="button"
                       @click="emit('merchant', r.merchantId)"
                     >
                       {{ offersById.get(r.merchantId)?.merchantName }}</button
-                    ><small>ID {{ r.merchantId }}</small>
+                    ><small>ID {{ r.merchantId }}</small
+                    ><small class="promotion-category-label">{{
+                      offersById.get(r.merchantId)?.category ||
+                      t("未分类", "Uncategorized")
+                    }}</small>
                   </div>
                   <span class="promotion-relation-arrow" aria-hidden="true"
                     >→</span
@@ -311,9 +365,22 @@ watch(
                   <template v-if="mode === 'products'"
                     ><div
                       class="promotion-relation-node promotion-relation-product"
+                      :data-link-kind="linkKind(r)"
                     >
-                      <small>{{ evidence(r) }}</small
+                      <span
+                        class="promotion-target-type"
+                        :data-link-kind="linkKind(r)"
+                        ><span
+                          class="promotion-type-dot"
+                          aria-hidden="true"
+                        />{{ linkLabel(linkKind(r), language) }}</span
+                      ><small>{{ evidence(r) }}</small
                       ><strong>{{ target(r) }}</strong
+                      ><span
+                        v-if="scopeFor(r)"
+                        class="promotion-asin-scope"
+                        :data-asin-scope="scopeFor(r)"
+                        >{{ asinScopeLabel(scopeFor(r)!, language) }}</span
                       ><small
                         v-if="
                           r.purchasedAsin &&
@@ -371,8 +438,8 @@ watch(
       <p v-if="mode === 'products'" class="promotion-note">
         {{
           t(
-            "“成交 ASIN”表示该媒体产生了此商品的成交记录；只有链接目标证据才能标为“推广 ASIN”。未关联到单品的点击不分摊给商品。",
-            "A purchased ASIN identifies a recorded purchase from that publisher. Only destination evidence identifies a promoted ASIN. Unattributed clicks are not allocated to products.",
+            "清单内/外按当前商家 ID 对应的 ASIN 清单判断；未提供清单 ASIN 时不推断范围。“成交 ASIN”不是推广目标证据，未关联到单品的点击不分摊给商品。",
+            "List membership uses the current merchant ID and its ASIN list. No list means unspecified scope. Purchased ASINs do not prove promoted destinations; unattributed clicks are not allocated to products.",
           )
         }}
       </p>
