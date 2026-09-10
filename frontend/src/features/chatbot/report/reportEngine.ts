@@ -82,6 +82,19 @@ function merchantRowsFromPayload(payload: unknown, merchantId: string): readonly
   }];
 }
 
+function merchantIdForQuery(query: ReportQuery, offers: readonly ReportRow[]): string {
+  if (query.merchantIds.length === 1) return query.merchantIds[0]!;
+  const lookup = text(query.lookupText || query.merchantNames[0]).toLowerCase();
+  if (!lookup) return "";
+  const match = offers
+    .map((raw) => ({ raw, row: normalizeOfferRow(raw) }))
+    .find(({ row }) => {
+      const name = rowMerchantName(row as Readonly<Record<string, unknown>>).toLowerCase();
+      return Boolean(name) && (name.includes(lookup) || lookup.includes(name));
+    });
+  return match ? rowMerchantId(match.row as Readonly<Record<string, unknown>>) : "";
+}
+
 function trendCandidateRows(query: ReportQuery, offers: readonly ReportRow[]): readonly ReportRow[] {
   return offers.filter((raw) => {
     const row = normalizeOfferRow(raw);
@@ -483,11 +496,15 @@ export async function runReportEngine(options: ReportEngineRunOptions): Promise<
       if (isRecord(error) && error.name === "AbortError") throw error;
     }
   }
-  if ((query.intent === "merchant" || query.intent === "analysis") && query.merchantIds.length === 1) {
+  const detailMerchantId = query.intent === "merchant" || query.intent === "analysis"
+    ? merchantIdForQuery(query, offers)
+    : "";
+  if (detailMerchantId) {
     try {
-      const payload = await options.provider.merchant(query.merchantIds[0]!, query.months || 3, signal);
+      const detailMonths = query.intent === "merchant" ? Math.max(query.months || 12, 12) : query.months || 3;
+      const payload = await options.provider.merchant(detailMerchantId, detailMonths, signal);
       abortIfNeeded(signal);
-      const rows = merchantRowsFromPayload(payload, query.merchantIds[0]!);
+      const rows = merchantRowsFromPayload(payload, detailMerchantId);
       offers = mergeRows(offers, rows);
       if (rows.length && sourceSnapshot(options.provider).kind === "db") source = { ...source, kind: "db" };
     } catch (error) {
@@ -641,17 +658,20 @@ export async function runReportEngine(options: ReportEngineRunOptions): Promise<
     reportSummary = summaryForRows(rows);
     blocks.push({ id: "trend", kind: "trend", title, rows, columns: trendColumns(language), metric: payload.metric, categoryOptions: payload.categoryOptions, activeCategory: payload.activeCategory, visibleColumns: payload.visibleColumns });
   } else if (query.intent === "tier" || query.intent === "category" || query.intent === "merchant" || query.intent === "asin" || query.intent === "keyword") {
-    const payload = buildEntityReport(query, offers, productKeywords, language);
+    const entityQuery: ReportQuery = query.intent === "merchant" && detailMerchantId && !query.merchantIds.length && !query.merchantNames.length
+      ? { ...query, merchantIds: [detailMerchantId] }
+      : query;
+    const payload = buildEntityReport(entityQuery, offers, productKeywords, language);
     rows = payload.rows;
     status = payload.status;
     title = payload.title;
     note = payload.note;
     let unmatched = payload.unmatched;
-    if (!rows.length && query.intent === "merchant" && query.lookupText && hasKeywordPayload(productKeywords)) {
+    if (!rows.length && entityQuery.intent === "merchant" && entityQuery.lookupText && hasKeywordPayload(productKeywords)) {
       const keywordQuery: ReportQuery = {
-        ...query,
+        ...entityQuery,
         intent: "keyword",
-        keyword: query.lookupText,
+        keyword: entityQuery.lookupText,
         merchantIds: [],
         merchantNames: [],
         lookupText: undefined
@@ -663,15 +683,15 @@ export async function runReportEngine(options: ReportEngineRunOptions): Promise<
         note = keywordPayload.note;
       }
     }
-    if (!rows.length && payload.status !== "needs_input" && (query.intent === "merchant" || query.intent === "keyword" || query.intent === "asin")) {
+    if (!rows.length && payload.status !== "needs_input" && (entityQuery.intent === "merchant" || entityQuery.intent === "keyword" || entityQuery.intent === "asin")) {
       try {
-        const searchPayload = await options.provider.search(query.lookupText || query.keyword || query.publisherQuery || query.prompt, signal);
+        const searchPayload = await options.provider.search(entityQuery.lookupText || entityQuery.keyword || entityQuery.publisherQuery || entityQuery.prompt, signal);
         abortIfNeeded(signal);
         const remoteRows = reportRowsFromPayload(searchPayload);
         if (remoteRows.length) {
-          const remoteQuery = query.intent === "merchant" && query.lookupText && !query.merchantIds.length && !query.merchantNames.length
-            ? { ...query, merchantNames: [query.lookupText] }
-            : query;
+          const remoteQuery = entityQuery.intent === "merchant" && entityQuery.lookupText && !entityQuery.merchantIds.length && !entityQuery.merchantNames.length
+            ? { ...entityQuery, merchantNames: [entityQuery.lookupText] }
+            : entityQuery;
           const fallback = buildEntityReport(remoteQuery, remoteRows, productKeywords, language);
           rows = fallback.rows;
           status = fallback.status;

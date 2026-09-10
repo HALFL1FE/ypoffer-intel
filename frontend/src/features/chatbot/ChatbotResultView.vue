@@ -6,15 +6,33 @@ import ChatbotReportBlocks from "./ChatbotReportBlocks.vue";
 import type { ChatbotReportViewResult } from "./chatbotViewTypes";
 import type { ReportDocument } from "./report/reportContracts";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   readonly language: UiLanguage;
   readonly result: ChatbotReportViewResult;
-}>();
+  /** Deep Window uses the legacy compact report surface without duplicate metadata. */
+  readonly compact?: boolean;
+  /** Merchant/ASIN legacy overviews render structured blocks themselves. */
+  readonly renderStructured?: boolean;
+}>(), {
+  compact: false,
+  renderStructured: true
+});
 
 const structuredDocument = computed<ReportDocument | null>(() => {
   if (props.result.document) return props.result.document;
   return "documentId" in props.result ? props.result as unknown as ReportDocument : null;
 });
+
+const richHtml = computed(() => [
+  props.result.contentHtml,
+  props.result.recommendationHtml,
+  structuredDocument.value?.contentHtml,
+  structuredDocument.value?.recommendationHtml
+]
+  .map((html) => html?.trim() || "")
+  .filter(Boolean)
+  .filter((html, index, values) => values.indexOf(html) === index)
+  .join(""));
 
 const emit = defineEmits<{
   (event: "download", downloadId: string, answerId?: string): void;
@@ -118,7 +136,7 @@ function handleDownload(event: MouseEvent): void {
 
 <template>
   <section class="chatbot-result-view" data-chatbot-result @click="handleDownload">
-    <div class="chatbot-result-meta">
+    <div v-if="!compact" class="chatbot-result-meta">
       <div>
         <span class="chatbot-result-kicker">{{ result.intent }}</span>
         <p class="chatbot-result-message">{{ result.message || copy.empty }}</p>
@@ -127,6 +145,7 @@ function handleDownload(event: MouseEvent): void {
     </div>
 
     <div
+      v-if="!compact"
       data-chatbot-result-status
       class="chatbot-result-status"
       :data-status="result.status"
@@ -136,7 +155,7 @@ function handleDownload(event: MouseEvent): void {
       {{ result.status }}
     </div>
 
-    <div v-if="!result.contentHtml && result.rows.length" class="chatbot-result-stats" aria-label="Chatbot summary">
+    <div v-if="!structuredDocument && !richHtml && result.rows.length" class="chatbot-result-stats" aria-label="Chatbot summary">
       <article v-for="stat in stats" :key="stat.key" data-chatbot-stat class="chatbot-result-stat">
         <span>{{ stat.label }}</span>
         <strong>{{ stat.value }}</strong>
@@ -144,14 +163,14 @@ function handleDownload(event: MouseEvent): void {
     </div>
 
     <ChatbotReportBlocks
-      v-if="structuredDocument?.blocks.length"
+      v-if="renderStructured && structuredDocument?.blocks.length"
       :language="language"
       :blocks="structuredDocument.blocks"
       data-chatbot-structured-report
       @interact="(action, value) => emit('context-interact', action, value)"
     />
 
-    <div v-if="result.contentHtml" class="chatbot-result-rich-html" data-chatbot-rich-result v-html="result.contentHtml"></div>
+    <div v-if="richHtml" class="chatbot-result-rich-html" data-chatbot-rich-result v-html="richHtml"></div>
 
     <p v-else-if="!structuredDocument && !result.rows.length" data-chatbot-empty data-chatbot-explicit-state="empty" class="chatbot-result-empty">
       {{ result.message || copy.empty }}

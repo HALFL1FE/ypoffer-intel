@@ -38,6 +38,10 @@ import type {
 
 type Row = Readonly<Record<string, unknown>>;
 
+const LEGACY_TREND_CORE_COLUMNS = [
+  "month", "salesAmount", "orders", "epc", "aov", "clicks", "affiliatePayout", "dpv", "atc", "conversionRate", "deltaPct"
+] as const;
+
 export interface ChatbotSessionOptions {
   readonly offers: readonly Row[];
   readonly paymentRecords?: readonly Row[];
@@ -1177,13 +1181,16 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
         return true;
       }
       if (trendBlock && ["trend-column-toggle", "trend-column-core", "trend-column-all"].includes(normalized)) {
-        const core = trendBlock.columns.slice(0, 3).map((column) => column.key);
+        const available = new Set(trendBlock.columns.map((column) => column.key));
+        const core = LEGACY_TREND_CORE_COLUMNS.filter((column) => available.has(column));
         const all = trendBlock.columns.map((column) => column.key);
         const visibleColumns = normalized === "trend-column-core"
-          ? core
+          ? (core.length ? core : trendBlock.columns.slice(0, 3).map((column) => column.key))
           : normalized === "trend-column-all"
             ? all
-            : trendBlock.visibleColumns.length === all.length ? core : all;
+            : trendBlock.visibleColumns.length === all.length
+              ? (core.length ? core : trendBlock.columns.slice(0, 3).map((column) => column.key))
+              : all;
         const nextDocument: ReportDocument = {
           ...activeReport,
           blocks: activeReport.blocks.map((block) => block.id === trendBlock.id ? { ...block, visibleColumns } : block)

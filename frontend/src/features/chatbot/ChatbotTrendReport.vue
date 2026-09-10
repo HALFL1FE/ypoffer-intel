@@ -36,6 +36,54 @@ const chartPoints = computed(() => {
   }).join(" ");
 });
 
+const summaryMetricKeys = computed(() => {
+  const reserved = new Set(["month", "previousValue", "delta", "deltaPct", "estimated"]);
+  const keys = props.block.visibleColumns.filter((key) => !reserved.has(key));
+  return keys.length ? keys : ["value"];
+});
+
+const summaryCards = computed(() => {
+  if (props.block.rows.length < 2) return [];
+  const first = props.block.rows[0]!;
+  const last = props.block.rows.at(-1)!;
+  return summaryMetricKeys.value
+    .map((key) => {
+      const firstValue = metricValue(first, key);
+      const lastValue = metricValue(last, key);
+      if (firstValue === null && lastValue === null) return null;
+      const firstNumber = firstValue ?? 0;
+      const lastNumber = lastValue ?? 0;
+      const deltaPct = firstNumber === 0 ? 0 : (lastNumber - firstNumber) / Math.abs(firstNumber) * 100;
+      const direction = lastNumber > firstNumber ? "up" : lastNumber < firstNumber ? "down" : "flat";
+      return {
+        key,
+        label: key === "value" ? metricLabel() : props.block.columns.find((column) => column.key === key)?.label || key,
+        first: formatSummaryValue(firstValue, key),
+        last: formatSummaryValue(lastValue, key),
+        delta: deltaPct === 0 ? "—" : `${deltaPct > 0 ? "+" : ""}${deltaPct.toFixed(1)}%`,
+        direction,
+        arrow: direction === "up" ? "↑" : direction === "down" ? "↓" : "→"
+      };
+    })
+    .filter((card): card is NonNullable<typeof card> => Boolean(card));
+});
+
+function metricValue(row: Readonly<Record<string, unknown>>, key: string): number | null {
+  const raw = row[key];
+  if (raw === null || raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function formatSummaryValue(raw: number | null, key: string): string {
+  if (raw === null) return props.language === "zh" ? "不可用" : "N/A";
+  if (["conversionRate", "commissionRate"].includes(key)) return `${(Math.abs(raw) <= 1 ? raw * 100 : raw).toFixed(2)}%`;
+  if (["orders", "clicks", "dpv", "atc"].includes(key)) return Math.round(raw).toLocaleString();
+  if (["epc", "allEpc"].includes(key)) return `$${raw.toFixed(3)}`;
+  if (["salesAmount", "revenue", "aov", "affiliatePayout", "affCommission", "payout", "directSales", "haloSales"].includes(key)) return `$${raw.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  return raw.toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
 function label(column: ReportColumn): string {
   return column.label;
 }
@@ -103,6 +151,17 @@ function selectedColumnValue(event: Event, key: string): string {
         </label>
       </div>
       <span class="chatbot-trend-active-metric">{{ metricLabel() }}</span>
+    </div>
+    <div v-if="summaryCards.length" class="chatbot-trend-summary" data-trend-summary>
+      <article v-for="card in summaryCards" :key="card.key" class="trend-card" data-trend-summary-card>
+        <span class="trend-card-label">{{ card.label }}</span>
+        <div class="trend-card-values">
+          <strong class="trend-card-first">{{ card.first }}</strong>
+          <span class="trend-card-arrow" aria-hidden="true">→</span>
+          <strong class="trend-card-last">{{ card.last }}</strong>
+        </div>
+        <span class="trend-card-delta" :class="card.direction">{{ card.arrow }} {{ card.delta }}</span>
+      </article>
     </div>
     <svg v-if="block.rows.length" class="chatbot-trend-svg" viewBox="0 0 640 180" role="img" :aria-label="block.title">
       <polyline :points="chartPoints" fill="none" stroke="currentColor" stroke-width="3" vector-effect="non-scaling-stroke" />
