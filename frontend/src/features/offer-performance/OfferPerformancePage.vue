@@ -1,6 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import PromotionRelations from "./PromotionRelations.vue";
+import PromotionImport from "./PromotionImport.vue";
+import {
+  categoryStyle,
+  LINK_KINDS,
+  linkKind,
+  linkLabel,
+  type LinkKind,
+  ASIN_SCOPES,
+  asinScope,
+  asinScopeLabel,
+  type AsinScope,
+} from "./promotionAppearance";
 import DatePicker from "../../shared/components/DatePicker.vue";
 import type { UiLanguage } from "../../shared/i18n";
 import { loadCatalog, loadReport } from "./performanceApi";
@@ -11,7 +23,6 @@ import {
   emptyMetrics,
   monthlyBaseline,
   observedDays,
-  parseBatch,
   sumMetrics,
   windowDates,
   restoreBatches,
@@ -19,6 +30,7 @@ import {
 } from "./performanceModel";
 import type {
   Metric,
+  MediaRow,
   PerformanceReport,
   PromotionBatch,
   ReportRequest,
@@ -61,9 +73,9 @@ const search = ref(""),
   showDaily = ref(false),
   mediaSearch = ref("");
 const importOpen = ref(false),
-  importDate = ref(""),
-  importError = ref(""),
-  importing = ref(false);
+  importNotice = ref("");
+const targetFilter = ref<LinkKind | "all">("all");
+const targetScope = ref<AsinScope | "all">("all");
 const mediaLimit = ref(100),
   linkLimit = ref(100);
 const manualOpen = ref(false),
@@ -142,6 +154,7 @@ const selected = computed(() =>
 const selectedStats = computed(() =>
   report.value?.merchants.find((o) => o.merchantId === selectedId.value),
 );
+const scopeForSelected = (row: MediaRow) => asinScope(row, selected.value);
 const baseline = computed(() =>
   monthlyBaseline(selectedStats.value, asOf.value),
 );
@@ -172,7 +185,7 @@ const media = computed(() =>
     )
     .sort((a, b) => (b.after.revenue || 0) - (a.after.revenue || 0)),
 );
-const links = computed(() =>
+const searchedLinks = computed(() =>
   (detail.value?.links || [])
     .filter((m) =>
       `${m.publisherName} ${m.publisherId} ${m.asin} ${m.purchasedAsin}`
@@ -180,6 +193,14 @@ const links = computed(() =>
         .includes(mediaSearch.value.toLowerCase()),
     )
     .sort((a, b) => (b.after.clicks || 0) - (a.after.clicks || 0)),
+);
+const links = computed(() =>
+  searchedLinks.value.filter(
+    (row) =>
+      (targetFilter.value === "all" || linkKind(row) === targetFilter.value) &&
+      (targetScope.value === "all" ||
+        scopeForSelected(row) === targetScope.value),
+  ),
 );
 const daily = computed(() =>
   Array.from({ length: range.value?.days || 0 }, (_, index) => {
@@ -450,6 +471,8 @@ async function selectMerchant(id: string) {
   if (!report.value || !appliedRequest) return;
   mediaLimit.value = 100;
   linkLimit.value = 100;
+  targetFilter.value = "all";
+  targetScope.value = "all";
   if (!selectedId.value) returnFocus = document.activeElement as HTMLElement;
   detailController?.abort();
   detailController = new AbortController();
@@ -473,35 +496,20 @@ async function selectMerchant(id: string) {
     if (revision === detailId) detailLoading.value = false;
   }
 }
-async function importFile(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0];
-  if (!file || !props.readFile) return;
-  importError.value = "";
-  if (!windowDates(importDate.value)) {
-    importError.value = t("先选择推送日期。", "Choose the launch date first.");
-    return;
-  }
-  importing.value = true;
-  try {
-    const item = parseBatch(
-      await props.readFile(file),
-      file.name,
-      importDate.value,
-    );
-    batches.value.push(item);
-    persist();
+async function confirmImport(item: PromotionBatch) {
+  batches.value.push(item);
+  importOpen.value = false;
+  importNotice.value = t(
+    `已导入「${item.name}」：${item.offers.length} 个商家。请在下方追踪清单中选择。`,
+    `Imported “${item.name}”: ${item.offers.length} merchants. Select the tracking list below.`,
+  );
+  persist();
+  if (!batch.value) {
     batchId.value = item.id;
-    importOpen.value = false;
     await selectBatch();
-  } catch {
-    importError.value = t(
-      "无法导入：请提供包含 Merchant ID、Merchant Name 的表，最多 200 个商家。",
-      "Import requires Merchant ID and Merchant Name columns, up to 200 merchants.",
-    );
-  } finally {
-    importing.value = false;
-    (event.target as HTMLInputElement).value = "";
   }
+  await nextTick();
+  document.getElementById("promotion-list-selector")?.focus();
 }
 function exportRows() {
   props.download?.(
@@ -649,33 +657,16 @@ onBeforeUnmount(() => {
         {{ t("重试", "Retry") }}
       </button>
     </div>
-    <section v-if="importOpen" class="promotion-panel promotion-import">
-      <h3>{{ t("导入商家清单", "Import tracked merchants") }}</h3>
-      <p>
-        {{
-          t(
-            "只需 Merchant ID 和 Merchant Name（或商家 ID、商家名称）。品类、ASIN 均可省略；支持以后单独添加商家。清单保存在当前浏览器。",
-            "Only Merchant ID and Merchant Name are required. Category and ASIN are optional; add individual merchants later. Lists are saved in this browser.",
-          )
-        }}
-      </p>
-      <label
-        >{{ t("推送日期", "Launch date")
-        }}<DatePicker
-          v-model="importDate"
-          :language="language"
-          :label="t('新批次推送日期', 'New batch launch date')" /></label
-      ><input
-        type="file"
-        accept=".xlsx,.xls,.csv,.tsv"
-        :disabled="importing"
-        :aria-label="t('选择 Offer 工作簿', 'Choose an offer workbook')"
-        @change="importFile"
-      />
-      <p role="status">
-        {{ importing ? t("正在导入…", "Importing…") : importError }}
-      </p>
-    </section>
+    <PromotionImport
+      v-if="importOpen && readFile"
+      :language="language"
+      :default-date="batch?.launchDate || launch"
+      :read-file="readFile"
+      @confirm="confirmImport"
+    />
+    <p v-if="importNotice" role="status" class="promotion-message">
+      {{ importNotice }}
+    </p>
     <section
       v-if="batch"
       class="promotion-panel promotion-filters"
@@ -684,7 +675,11 @@ onBeforeUnmount(() => {
       <div class="promotion-batch">
         <label
           >{{ t("追踪清单", "Tracking list")
-          }}<select v-model="batchId" @change="selectBatch">
+          }}<select
+            id="promotion-list-selector"
+            v-model="batchId"
+            @change="selectBatch"
+          >
             <option v-for="item in batches" :key="item.id" :value="item.id">
               {{ item.name }}
             </option>
@@ -941,16 +936,19 @@ onBeforeUnmount(() => {
               :class="{ selected: selectedId === r.merchantId }"
             >
               <th scope="row">
-                <button
-                  type="button"
-                  :disabled="!report"
-                  @click="selectMerchant(r.merchantId)"
-                >
-                  {{ r.merchantName }} <span aria-hidden="true">↗</span></button
-                ><small
-                  >ID {{ r.merchantId }} ·
-                  {{ r.category || t("未分类", "Uncategorized") }}</small
-                >
+                <div class="promotion-brand" :style="categoryStyle(r.category)">
+                  <button
+                    type="button"
+                    :disabled="!report"
+                    @click="selectMerchant(r.merchantId)"
+                  >
+                    {{ r.merchantName }}
+                    <span aria-hidden="true">↗</span></button
+                  ><small
+                    >ID {{ r.merchantId }} ·
+                    {{ r.category || t("未分类", "Uncategorized") }}</small
+                  >
+                </div>
               </th>
               <td>{{ format(r.before.revenue, "revenue") }}</td>
               <td class="promotion-emphasis">
@@ -1012,8 +1010,13 @@ onBeforeUnmount(() => {
             >{{ t("商家下钻", "Merchant detail") }} · ID
             {{ selected.merchantId }}</span
           >
-          <h3>{{ selected.merchantName }}</h3>
-          <p>{{ selected.category }}</p>
+          <div
+            class="promotion-brand"
+            :style="categoryStyle(selected.category)"
+          >
+            <h3>{{ selected.merchantName }}</h3>
+            <p>{{ selected.category || t("未分类", "Uncategorized") }}</p>
+          </div>
         </div>
         <button type="button" @click="closeDetail">
           {{ t("收起详情", "Close details") }}
@@ -1177,6 +1180,76 @@ onBeforeUnmount(() => {
             )
           }}
         </p>
+        <div
+          class="promotion-target-filters"
+          role="group"
+          :aria-label="t('推广链接类型', 'Promotion link type')"
+        >
+          <button
+            type="button"
+            :aria-pressed="targetFilter === 'all'"
+            @click="
+              targetFilter = 'all';
+              targetScope = 'all';
+              linkLimit = 100;
+            "
+          >
+            {{ t("全部", "All") }} · {{ searchedLinks.length }}
+          </button>
+          <button
+            v-for="kind in LINK_KINDS"
+            :key="kind"
+            type="button"
+            :data-link-kind="kind"
+            :aria-pressed="targetFilter === kind"
+            @click="
+              targetFilter = kind;
+              targetScope = 'all';
+              linkLimit = 100;
+            "
+          >
+            <span class="promotion-type-dot" aria-hidden="true" />{{
+              linkLabel(kind, language)
+            }}
+            · {{ searchedLinks.filter((row) => linkKind(row) === kind).length }}
+          </button>
+        </div>
+        <div
+          v-if="targetFilter === 'all' || targetFilter === 'asin'"
+          class="promotion-scope-filters"
+          role="group"
+          :aria-label="t('单品清单范围', 'Product list scope')"
+        >
+          <span>{{ t("单品范围", "Product scope") }}</span>
+          <button
+            type="button"
+            :aria-pressed="targetScope === 'all'"
+            @click="
+              targetScope = 'all';
+              linkLimit = 100;
+            "
+          >
+            {{ t("不限范围", "Any scope") }}
+          </button>
+          <button
+            v-for="scope in ASIN_SCOPES"
+            :key="scope"
+            type="button"
+            :data-asin-scope="scope"
+            :aria-pressed="targetScope === scope"
+            @click="
+              targetFilter = 'asin';
+              targetScope = scope;
+              linkLimit = 100;
+            "
+          >
+            {{ asinScopeLabel(scope, language) }} ·
+            {{
+              searchedLinks.filter((row) => scopeForSelected(row) === scope)
+                .length
+            }}
+          </button>
+        </div>
         <div class="promotion-scroll" tabindex="0">
           <table>
             <thead>
@@ -1184,6 +1257,7 @@ onBeforeUnmount(() => {
                 <th>{{ t("媒体", "Publisher") }}</th>
                 <th>{{ t("链接类型", "Link type") }}</th>
                 <th>{{ t("推广 ASIN", "Promoted ASIN") }}</th>
+                <th>{{ t("与清单的关系", "List membership") }}</th>
                 <th>{{ t("成交 ASIN", "Purchased ASIN") }}</th>
                 <th>{{ t("观察期营收", "Observed revenue") }}</th>
                 <th>{{ t("点击", "Clicks") }}</th>
@@ -1198,16 +1272,24 @@ onBeforeUnmount(() => {
                   }}
                 </th>
                 <td>
-                  <span class="promotion-tag">{{
-                    l.linkType === "unknown"
-                      ? t("未识别", "Unknown")
-                      : l.linkType === "asin"
-                        ? "ASIN"
-                        : "Storefront"
-                  }}</span>
+                  <span
+                    class="promotion-target-type"
+                    :data-link-kind="linkKind(l)"
+                    ><span class="promotion-type-dot" aria-hidden="true" />{{
+                      linkLabel(linkKind(l), language)
+                    }}</span
+                  >
                 </td>
                 <td>
                   <code>{{ l.asin || "—" }}</code>
+                </td>
+                <td>
+                  <span
+                    v-if="scopeForSelected(l)"
+                    class="promotion-asin-scope"
+                    :data-asin-scope="scopeForSelected(l)"
+                    >{{ asinScopeLabel(scopeForSelected(l)!, language) }}</span
+                  ><span v-else>—</span>
                 </td>
                 <td>
                   <code>{{ l.purchasedAsin || "—" }}</code>
@@ -1217,7 +1299,7 @@ onBeforeUnmount(() => {
                 <td>{{ format(l.after.orders, "orders") }}</td>
               </tr>
               <tr v-if="!links.length">
-                <td colspan="7">
+                <td colspan="8">
                   {{
                     t(
                       "当前周期暂无链接明细。",
@@ -1256,9 +1338,13 @@ onBeforeUnmount(() => {
           :key="c.name"
           type="button"
           :aria-pressed="category === c.name"
+          :style="categoryStyle(c.name)"
           @click="category = c.name"
         >
-          <span>{{ c.name }}</span
+          <span
+            ><i class="promotion-category-dot" aria-hidden="true" />{{
+              c.name
+            }}</span
           ><i
             ><b
               :style="{
