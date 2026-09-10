@@ -1,4 +1,6 @@
 import { mount } from "@vue/test-utils";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import ChatbotChatView from "./ChatbotChatView.vue";
@@ -25,7 +27,7 @@ describe("ChatbotChatView", () => {
     expect(wrapper.get("[data-chatbot-input]").attributes("placeholder")).toBe("询问 EPC、分层、AOV、转化率、未付款 offer...");
   });
 
-  it("renders memory starter questions without an extra Chat Mode conversion button", async () => {
+  it("不显示截图中的继续追问建议面板", async () => {
     const wrapper = mount(ChatbotChatView, {
       props: {
         language: "en",
@@ -46,7 +48,7 @@ describe("ChatbotChatView", () => {
       }
     });
 
-    expect(wrapper.find('[data-chatbot-starter]').exists()).toBe(true);
+    expect(wrapper.find('[data-chatbot-starter]').exists()).toBe(false);
     expect(wrapper.find('[data-chatbot-memory-recommendation]').exists()).toBe(true);
     expect(wrapper.find('.insight-panel').exists()).toBe(true);
     expect(wrapper.find('.chat-panel').exists()).toBe(true);
@@ -56,8 +58,8 @@ describe("ChatbotChatView", () => {
     expect(wrapper.find('[data-chatbot-action="open-chat-deep"]').exists()).toBe(false);
     await wrapper.get('[data-download-id="memory-recommendation-1"]').trigger("click");
     expect(wrapper.emitted("download")?.[0]).toEqual(["memory-recommendation-1"]);
-    await wrapper.get('[data-chatbot-starter-question]').trigger("click");
-    expect(wrapper.emitted("starter-prompt")?.[0]).toEqual(["Analyze this report"]);
+    expect(wrapper.find('[data-chatbot-starter-question]').exists()).toBe(false);
+    expect(wrapper.emitted("starter-prompt")).toBeUndefined();
   });
 
   it("keeps the user's question inside the Chat Mode user bubble", () => {
@@ -74,6 +76,29 @@ describe("ChatbotChatView", () => {
 
     expect(wrapper.get('.chatbot-chat-log .message.user .chat-stream-text').text()).toBe("近期 Shokz 怎么样");
     expect(wrapper.get('[data-chatbot-action="send"]').classes()).toContain("chatbot-chat-send");
+  });
+
+  it("marks user questions as a blue bubble with an explicit white-text style contract", () => {
+    const wrapper = mount(ChatbotChatView, {
+      props: {
+        language: "en",
+        messages: [{ id: "user-blue", role: "user", content: "merchant: shokz" }],
+        memory: [],
+        input: "",
+        loading: false,
+        error: ""
+      }
+    });
+    const styles = readFileSync(resolve(process.cwd(), "src/shared/styles/page-foundations.css"), "utf8");
+
+    expect(wrapper.get(".message.user .chat-stream-text").classes()).toContain("chatbot-user-message");
+    expect(styles).toMatch(/\.message\.user\s+p[^\{]*\{[^\}]*color:\s*#fff/i);
+  });
+
+  it("流式回答的光标保持静态，避免生成过程闪烁", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/features/chatbot/chatbot.css"), "utf8");
+
+    expect(styles).toMatch(/\.chatbot-chat-cursor\s*\{[^\}]*animation:\s*none/i);
   });
 
   it("renders Legacy answer HTML as a summary card instead of literal markup", () => {

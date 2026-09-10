@@ -18,7 +18,7 @@ function store(): DeepWindowStore {
 }
 
 describe("createDeepWindowStore", () => {
-  it("keeps the active window and supports the modern lifecycle controls", () => {
+  it("keeps the active window and follows the Legacy Deep Window lifecycle", () => {
     const windows = store();
     const first = windows.open(result("Tapo"));
     const second = windows.open(result("Shokz"));
@@ -32,7 +32,9 @@ describe("createDeepWindowStore", () => {
       summary: "Tapo report",
       pinned: true,
       minimized: true,
-      position: { x: 48, y: 72 },
+      position: { x: Math.max(0, window.innerWidth - 220 - 24), y: Math.max(0, window.innerHeight - 48 - 24) },
+      restorePosition: { x: 48, y: 72 },
+      hidden: false,
       canExport: true,
       canMinimize: true,
       canClose: true
@@ -41,15 +43,22 @@ describe("createDeepWindowStore", () => {
     windows.restore(first);
     windows.activate(first);
     expect(windows.getState().activeId).toBe(first);
+    expect(windows.getState().windows.find((item) => item.id === first)).toMatchObject({
+      minimized: false,
+      position: { x: 48, y: 72 }
+    });
+    expect(windows.getState().windows.find((item) => item.id === first)).not.toHaveProperty("restorePosition");
     expect(windows.clone(first)).not.toBeNull();
     expect(windows.getState().windows).toHaveLength(3);
     expect(windows.toggleOverlay(first)).toBe(true);
     expect(windows.export(first)?.query).toBe("Tapo");
-    expect(windows.cancel(first)).toBe(true);
-    expect(windows.getState().windows.find((item) => item.id === first)?.status).toBe("cancelled");
+    expect(windows.cancel(first)).toBe(false);
+    expect(windows.getState().windows.find((item) => item.id === first)?.status).toBe("ready");
 
     windows.close(second);
-    expect(windows.getState().windows.some((item) => item.id === second)).toBe(false);
+    expect(windows.getState().windows.find((item) => item.id === second)).toMatchObject({ hidden: true });
+    windows.activate(second);
+    expect(windows.getState().windows.find((item) => item.id === second)?.hidden).toBe(false);
   });
 
   it("notifies subscribers and routes memory drops without exposing raw internals", () => {
@@ -66,18 +75,43 @@ describe("createDeepWindowStore", () => {
 
     unsubscribe();
     windows.close(id);
-    expect(windows.getState().windows).toHaveLength(0);
+    expect(windows.getState().windows).toHaveLength(1);
+    expect(windows.getState().windows.find((item) => item.id === id)?.hidden).toBe(true);
+    windows.activate(id);
+    expect(windows.getState().windows.find((item) => item.id === id)?.hidden).toBe(false);
   });
 
-  it("aborts and marks only the selected loading window", () => {
+  it("aborts and removes only the selected loading window", () => {
     const controller = new AbortController();
     const windows = createDeepWindowStore({ signal: controller.signal });
     const id = windows.open(result("Tapo"), { status: "loading" });
+    const sibling = windows.open(result("Shokz"), { status: "loading" });
 
     expect(windows.cancel(id)).toBe(true);
-    expect(windows.getState().windows.find((item) => item.id === id)?.status).toBe("cancelled");
+    expect(windows.getState().windows.find((item) => item.id === id)).toBeUndefined();
+    expect(windows.getState().windows.find((item) => item.id === sibling)).toBeDefined();
     controller.abort();
-    expect(windows.getState().windows.find((item) => item.id === id)?.status).toBe("cancelled");
+    expect(windows.getState().windows.find((item) => item.id === sibling)?.status).toBe("cancelled");
+  });
+
+  it("按报告阶段推进骨架步骤并保留已完成状态", () => {
+    const windows = store();
+    const id = windows.open(result("Tapo"), {
+      status: "loading",
+      skeletonSteps: [
+        { id: "understand", label: "理解问题", state: "active" },
+        { id: "query", label: "查询数据", state: "pending" },
+        { id: "report", label: "生成报告", state: "pending" }
+      ]
+    });
+
+    expect(windows.updateSkeleton(id, 2)).toBe(true);
+    expect(windows.getState().windows.find((item) => item.id === id)?.skeletonSteps?.map((step) => step.state))
+      .toEqual(["done", "active", "pending"]);
+
+    expect(windows.updateSkeleton(id, 3)).toBe(true);
+    expect(windows.getState().windows.find((item) => item.id === id)?.skeletonSteps?.map((step) => step.state))
+      .toEqual(["done", "done", "active"]);
   });
 
   it("applies trend metric, category, and column controls instead of treating them as no-ops", () => {

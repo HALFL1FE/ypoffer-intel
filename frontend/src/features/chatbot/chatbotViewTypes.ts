@@ -89,6 +89,12 @@ export type ChatbotReportViewResult = ChatbotModelReportResult & {
   readonly sessionResult?: ChatbotSessionResult;
 };
 
+export interface ChatbotReportHistoryItem {
+  readonly id: string;
+  readonly query: string;
+  readonly result: ChatbotReportViewResult;
+}
+
 export interface ChatbotStarterCard {
   readonly id: string;
   readonly title: string;
@@ -128,9 +134,12 @@ export interface ChatbotViewState {
   readonly errorCode?: string | null;
 }
 
+export type ChatbotReportProgressStage = "understand" | "query" | "report";
+
 export interface ChatbotRunCallbacks {
   readonly onToken?: (token: string) => void;
   readonly onChange?: (state: ChatbotViewState) => void;
+  readonly onProgress?: (stage: ChatbotReportProgressStage) => void;
   readonly signal?: AbortSignal;
 }
 

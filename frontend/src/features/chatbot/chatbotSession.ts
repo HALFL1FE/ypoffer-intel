@@ -38,6 +38,10 @@ import type {
 
 type Row = Readonly<Record<string, unknown>>;
 
+const LEGACY_TREND_CORE_COLUMNS = [
+  "month", "salesAmount", "orders", "epc", "aov", "clicks", "affiliatePayout", "dpv", "atc", "conversionRate", "deltaPct"
+] as const;
+
 export interface ChatbotSessionOptions {
   readonly offers: readonly Row[];
   readonly paymentRecords?: readonly Row[];
@@ -696,6 +700,7 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
   }
 
   async function submitReport(prompt: string, callbacks: ChatbotRunCallbacks, signal: AbortSignal): Promise<ChatbotSessionResult> {
+    callbacks.onProgress?.("understand");
     let queryOffers: readonly Row[] = offers;
     try {
       const liveOffers = await reportProvider.offers(signal);
@@ -704,6 +709,7 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
       if (isRecord(error) && error.name === "AbortError") throw error;
       // 分类仍可使用 bootstrap/cache；报告引擎会再次复用同一提供器结果。
     }
+    callbacks.onProgress?.("query");
     let classification: ChatbotClassification | null = null;
     if (options.llmEnabled !== false) {
       try {
@@ -737,6 +743,7 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
         }
       } : {})
     });
+    callbacks.onProgress?.("report");
     const engineResult = await runReportEngine({
       query,
       language: currentLanguage,
@@ -777,10 +784,12 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
           ? `从报告记忆中选出 ${recommendation.selectedRows.length} 个商户：${recommendation.selectedRows.map((row) => String((row as Row).merchantName || (row as Row).brand || (row as Row).merchantId || "未知商户")).join("、")}。`
           : `Selected ${recommendation.selectedRows.length} merchants from report memory: ${recommendation.selectedRows.map((row) => String((row as Row).merchantName || (row as Row).brand || (row as Row).merchantId || "Unknown")).join(", ")}.`)
         : (currentLanguage === "zh" ? "报告记忆中没有符合条件的推荐结果。" : "No matching recommendation was found in report memory.");
+      const userMessageId = uuid("chat-user");
+      const assistantMessageId = uuid("chat-assistant");
       messages = [
         ...messages,
-        { role: "user", content: prompt } satisfies ChatbotSessionMessage,
-        { role: "assistant", content: response } satisfies ChatbotSessionMessage
+        { id: userMessageId, role: "user", content: prompt } satisfies ChatbotSessionMessage,
+        { id: assistantMessageId, role: "assistant", content: response } satisfies ChatbotSessionMessage
       ];
       history = [
         ...previousHistory,
@@ -795,10 +804,12 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
         recommendationHtml: recommendationHtml(response, currentLanguage)
       };
     }
+    const userMessageId = uuid("chat-user");
+    const assistantMessageId = uuid("chat-assistant");
     messages = [
       ...messages,
-      { role: "user", content: prompt } satisfies ChatbotSessionMessage,
-      { role: "assistant", content: "" } satisfies ChatbotSessionMessage
+      { id: userMessageId, role: "user", content: prompt } satisfies ChatbotSessionMessage,
+      { id: assistantMessageId, role: "assistant", content: "" } satisfies ChatbotSessionMessage
     ];
     notify();
     const runner = options.runChat || streamChatbotReply;
@@ -1177,13 +1188,16 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
         return true;
       }
       if (trendBlock && ["trend-column-toggle", "trend-column-core", "trend-column-all"].includes(normalized)) {
-        const core = trendBlock.columns.slice(0, 3).map((column) => column.key);
+        const available = new Set(trendBlock.columns.map((column) => column.key));
+        const core = LEGACY_TREND_CORE_COLUMNS.filter((column) => available.has(column));
         const all = trendBlock.columns.map((column) => column.key);
         const visibleColumns = normalized === "trend-column-core"
-          ? core
+          ? (core.length ? core : trendBlock.columns.slice(0, 3).map((column) => column.key))
           : normalized === "trend-column-all"
             ? all
-            : trendBlock.visibleColumns.length === all.length ? core : all;
+            : trendBlock.visibleColumns.length === all.length
+              ? (core.length ? core : trendBlock.columns.slice(0, 3).map((column) => column.key))
+              : all;
         const nextDocument: ReportDocument = {
           ...activeReport,
           blocks: activeReport.blocks.map((block) => block.id === trendBlock.id ? { ...block, visibleColumns } : block)

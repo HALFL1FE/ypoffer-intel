@@ -139,7 +139,9 @@ body:has([data-modern-root])[data-dash-theme="light"] :is(.insight-panel, .chat-
   margin-left: 4px;
   vertical-align: text-bottom;
   background: var(--nav-active, #1d6fd6);
-  animation: chatbot-blink 1s steps(2, jump-none) infinite;
+  border-radius: 2px;
+  opacity: .72;
+  animation: none;
 }
 
 .chatbot-report-chat-panel .chat-mode-toggle,
@@ -280,6 +282,233 @@ body:has([data-modern-root])[data-dash-theme="light"] :is(.insight-panel, .chat-
 .chatbot-result-view {
   min-width: 0;
   padding: 12px 2px;
+}
+
+/* Deep Window 复用旧版的报告顺序：概览/趋势在同一张纸面中展开。 */
+:where([data-modern-root]) .deep-quick-result {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+:where([data-modern-root]) .deep-context-overview,
+:where([data-modern-root]) .deep-context-chart {
+  min-width: 0;
+  overflow-x: auto;
+  padding: 16px 18px;
+  border: 1px solid var(--dw-line, var(--line));
+  border-radius: 12px;
+  background: var(--dw-card, var(--panel));
+  box-shadow: inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.55), rgb(255 255 255 / 0.04));
+}
+
+:where([data-modern-root]) .deep-overview-heading,
+:where([data-modern-root]) .deep-chart-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+  color: var(--dw-ink, var(--ink));
+  font-size: 13px;
+  font-weight: 750;
+}
+
+:where([data-modern-root]) .deep-overview-heading::before,
+:where([data-modern-root]) .deep-chart-heading::before {
+  content: "";
+  width: 3px;
+  height: 14px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  background: var(--dw-src, var(--accent, #2468f2));
+}
+
+:where([data-modern-root]) .deep-context-overview .chatbot-result-view,
+:where([data-modern-root]) .deep-context-chart .chatbot-result-view {
+  padding: 0;
+}
+
+:where([data-modern-root]) .deep-context-overview .merchant-focus {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where([data-modern-root]) .deep-context-overview .merchant-focus > h4 {
+  margin: 0;
+  color: var(--dw-ink, var(--ink));
+  font-size: 15px;
+  font-weight: 800;
+}
+
+:where([data-modern-root]) .deep-context-overview .deep-category-focus {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where([data-modern-root]) .deep-context-overview .deep-category-focus > h4 {
+  margin: 0;
+  color: var(--dw-ink, var(--ink));
+  font-size: 15px;
+  font-weight: 800;
+}
+
+:where([data-modern-root]) .deep-category-mini-table {
+  min-width: 0;
+}
+
+:where([data-modern-root]) .deep-category-mini-table h5 {
+  margin: 2px 0 8px;
+  color: var(--dw-ink, var(--ink));
+  font-size: 12px;
+}
+
+:where([data-modern-root]) .deep-category-mini-table .deep-context-products-table {
+  min-width: 1120px;
+}
+
+:where([data-modern-root]) .deep-asin-note {
+  margin: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--dw-line, var(--line));
+  border-radius: 10px;
+  color: var(--dw-muted, var(--muted));
+  background: var(--dw-paper-2, var(--panel));
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+:where([data-modern-root]) .deep-merchant-month-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  color: var(--dw-muted, var(--muted));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+:where([data-modern-root]) .deep-merchant-month-picker select {
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--dw-line-strong, var(--line));
+  border-radius: 8px;
+  color: var(--dw-ink, var(--ink));
+  background: var(--dw-paper-2, var(--panel));
+  font: inherit;
+  font-size: 11px;
+}
+
+:where([data-modern-root]) .deep-context-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+:where([data-modern-root]) .deep-context-stat,
+:where([data-modern-root]) .deep-context-overview .context-stat {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--dw-line, var(--line));
+  border-radius: 10px;
+  background: var(--dw-paper-2, var(--panel));
+}
+
+:where([data-modern-root]) .deep-context-stat span,
+:where([data-modern-root]) .deep-context-overview .context-stat span {
+  display: block;
+  overflow: hidden;
+  color: var(--dw-muted, var(--muted));
+  font-size: 9px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where([data-modern-root]) .deep-context-stat strong,
+:where([data-modern-root]) .deep-context-overview .context-stat strong {
+  display: block;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  color: var(--dw-ink, var(--ink));
+  font-size: 14px;
+  font-weight: 800;
+}
+
+:where([data-modern-root]) .deep-context-note {
+  margin: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--dw-line, var(--line));
+  border-radius: 10px;
+  color: var(--dw-muted, var(--muted));
+  background: var(--dw-paper-2, var(--panel));
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+:where([data-modern-root]) .deep-context-note p {
+  margin: 0;
+}
+
+:where([data-modern-root]) .deep-context-note p + p {
+  margin-top: 4px;
+}
+
+:where([data-modern-root]) .deep-context-note strong {
+  color: var(--dw-ink, var(--ink));
+}
+
+:where([data-modern-root]) .deep-context-products {
+  min-width: 0;
+}
+
+:where([data-modern-root]) .deep-context-products h5 {
+  margin: 2px 0 8px;
+  color: var(--dw-ink, var(--ink));
+  font-size: 12px;
+}
+
+:where([data-modern-root]) .deep-context-products-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--dw-line, var(--line));
+  border-radius: 10px;
+}
+
+:where([data-modern-root]) .deep-context-products-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+:where([data-modern-root]) .deep-context-products-table th,
+:where([data-modern-root]) .deep-context-products-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--dw-line, var(--line));
+  text-align: left;
+  vertical-align: top;
+}
+
+:where([data-modern-root]) .deep-context-products-table th {
+  color: var(--dw-muted, var(--muted));
+  background: var(--dw-paper-2, var(--panel));
+  font-size: 10px;
+  font-weight: 800;
+}
+
+:where([data-modern-root]) .deep-context-products-table td {
+  color: var(--dw-ink, var(--ink));
+}
+
+:where([data-modern-root]) .deep-context-products-table tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (max-width: 640px) {
+  :where([data-modern-root]) .deep-context-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .chatbot-result-meta {
@@ -1463,6 +1692,68 @@ body:has([data-modern-root])[data-dash-theme="light"] :is(.insight-panel, .chat-
   background: color-mix(in srgb, var(--nav-active, #2468f2) 10%, transparent);
   font-size: 10px;
   font-weight: 800;
+}
+
+.chatbot-trend-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.trend-card {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line, #dbe3eb);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel, #fff) 92%, var(--nav-active, #2468f2));
+}
+
+.trend-card-label {
+  display: block;
+  overflow: hidden;
+  color: var(--muted, #6f7f94);
+  font-size: 9px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trend-card-values {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--ink, #263450);
+  font-size: 11px;
+}
+
+.trend-card-values strong {
+  overflow-wrap: anywhere;
+}
+
+.trend-card-arrow {
+  color: var(--muted, #6f7f94);
+  font-size: 10px;
+}
+
+.trend-card-delta {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.trend-card-delta.up {
+  color: #16825a;
+}
+
+.trend-card-delta.down {
+  color: #b84c55;
+}
+
+.trend-card-delta.flat {
+  color: var(--muted, #6f7f94);
 }
 
 .chatbot-trend-svg {

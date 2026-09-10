@@ -79,6 +79,10 @@ describe("reportEngine actions", () => {
 
     expect(document.intent).toBe("analysis");
     expect(document.blocks.some((block) => block.kind === "trend")).toBe(true);
+    const initialTrend = document.blocks.find((block) => block.kind === "trend");
+    expect(initialTrend && initialTrend.kind === "trend" ? initialTrend.visibleColumns : []).toEqual([
+      "month", "salesAmount", "orders", "epc", "aov", "clicks", "affiliatePayout", "dpv", "atc", "conversionRate", "deltaPct"
+    ]);
 
     const next = await applyReportAction(document, {
       documentId: document.documentId,
@@ -149,6 +153,31 @@ describe("reportEngine actions", () => {
     const document = await executeReport(query, base, new AbortController().signal);
 
     expect(document.blocks.map((block) => block.id)).toEqual(expect.arrayContaining(["merchant-monthly", "merchant-products"]));
+    const monthly = document.blocks.find((block) => block.id === "merchant-monthly");
+    expect(monthly && monthly.kind !== "notice" ? monthly.rows : []).toHaveLength(2);
+  });
+
+  it("按商户名称打开 Deep Window 时也加载旧版概览所需的月度详情", async () => {
+    const offers = [{ ...parityOffers[0], monthly: [] }];
+    const loadMerchant = vi.fn(async () => ({
+      merchant: { merchantId: "1001", merchantName: "Alpha Audio" },
+      monthlyAmazonMetrics: [
+        { month: "2026-07", clicks: 200, orders: 12, salesAmount: 1200, affCommission: 60 },
+        { month: "2026-08", clicks: 300, orders: 18, salesAmount: 1800, affCommission: 90 }
+      ]
+    }));
+    const base: ReportEngineContext = {
+      offers,
+      paymentRecords: [],
+      productKeywords: {},
+      provider: createReportDataProvider({ offers, loadMerchant }),
+      now: () => new Date("2026-09-08T00:00:00Z")
+    };
+    const query = resolveReportQuery("/merchant: Alpha Audio", { language: "zh", categories: [] });
+    const document = await executeReport(query, base, new AbortController().signal);
+
+    expect(query.lookupText).toBe("Alpha Audio");
+    expect(loadMerchant).toHaveBeenCalledWith("1001", expect.any(Number), expect.any(AbortSignal));
     const monthly = document.blocks.find((block) => block.id === "merchant-monthly");
     expect(monthly && monthly.kind !== "notice" ? monthly.rows : []).toHaveLength(2);
   });

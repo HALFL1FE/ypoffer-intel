@@ -27,6 +27,8 @@ export interface DeepWindowState {
   readonly skeletonSteps?: readonly DeepWindowSkeletonStep[];
   readonly zIndex?: number;
   readonly minimized: boolean;
+  readonly hidden: boolean;
+  readonly restorePosition?: { readonly x: number; readonly y: number };
   readonly pinned: boolean;
   readonly overlay: boolean;
   readonly status: DeepWindowStatus;
@@ -52,6 +54,7 @@ export interface DeepWindowViewState {
 export interface DeepWindowOpenOptions {
   readonly status?: DeepWindowStatus;
   readonly position?: { readonly x: number; readonly y: number };
+  readonly skeletonSteps?: readonly DeepWindowSkeletonStep[];
 }
 
 export interface DeepWindowStoreOptions {
@@ -78,7 +81,8 @@ export interface DeepWindowStore {
   addToChat(id?: string): boolean;
   interact(id: string, action: DeepWindowInteraction, value?: string): boolean;
   setTrendColumns(id: string, columns: readonly string[]): boolean;
-  updateResult(id: string, result: ChatbotReportViewResult): boolean;
+  updateSkeleton(id: string, activeStep: number): boolean;
+  updateResult(id: string, result: ChatbotReportViewResult, status?: DeepWindowStatus): boolean;
   onChange(listener: (state: DeepWindowViewState) => void): () => void;
   dispose(): void;
 }
@@ -104,6 +108,56 @@ const DEFAULT_TREND_COLUMNS = [
 const ALL_TREND_COLUMNS = [
   ...DEFAULT_TREND_COLUMNS, "payout", "directSales", "haloSales"
 ] as const;
+const DEEP_WINDOW_WIDTH = 760;
+const DEEP_WINDOW_HEIGHT = 720;
+const DEEP_WINDOW_PILL_WIDTH = 220;
+const DEEP_WINDOW_PILL_HEIGHT = 48;
+const DEEP_WINDOW_EDGE = 24;
+const DEEP_WINDOW_STACK_OFFSET = 35;
+
+function viewport(): { readonly width: number; readonly height: number } {
+  if (typeof window === "undefined") return { width: 1280, height: 900 };
+  return {
+    width: Math.max(320, window.innerWidth || 1280),
+    height: Math.max(240, window.innerHeight || 900)
+  };
+}
+
+function skeletonStepsForActiveStep(
+  steps: readonly DeepWindowSkeletonStep[],
+  activeStep: number
+): readonly DeepWindowSkeletonStep[] {
+  if (!steps.length || !Number.isFinite(activeStep)) return steps;
+  const target = Math.max(1, Math.min(steps.length, Math.trunc(activeStep)));
+  return steps.map((step, index) => ({
+    ...step,
+    state: index + 1 < target ? "done" : index + 1 === target ? "active" : "pending"
+  }));
+}
+
+function centeredPosition(windowCount: number): { readonly x: number; readonly y: number } {
+  const { width, height } = viewport();
+  const cascade = windowCount % 4;
+  const maxX = Math.max(DEEP_WINDOW_EDGE, width - DEEP_WINDOW_WIDTH - DEEP_WINDOW_EDGE);
+  const maxY = Math.max(DEEP_WINDOW_EDGE, height - DEEP_WINDOW_HEIGHT - DEEP_WINDOW_EDGE);
+  return {
+    x: Math.max(DEEP_WINDOW_EDGE, Math.min(maxX, (width - DEEP_WINDOW_WIDTH) / 2 + cascade * 30)),
+    y: Math.max(DEEP_WINDOW_EDGE, Math.min(maxY, (height - DEEP_WINDOW_HEIGHT) / 2 + cascade * 30))
+  };
+}
+
+function minimizedPosition(minimizedCount: number): { readonly x: number; readonly y: number } {
+  const { width, height } = viewport();
+  return {
+    x: Math.max(DEEP_WINDOW_EDGE, width - DEEP_WINDOW_PILL_WIDTH - DEEP_WINDOW_EDGE),
+    y: Math.max(DEEP_WINDOW_EDGE, height - DEEP_WINDOW_PILL_HEIGHT - DEEP_WINDOW_EDGE
+      - minimizedCount * DEEP_WINDOW_STACK_OFFSET)
+  };
+}
+
+function nextZIndex(items: readonly DeepWindowState[]): number {
+  return Math.max(1300, ...items.map((item) => item.zIndex || 0)) + 1;
+}
 
 export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): DeepWindowStore {
   const deepWindow = ref<DeepWindowState | null>(null);
@@ -119,6 +173,8 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
       ...item,
       result: { ...item.result, rows: item.result.rows.slice(), summary: { ...item.result.summary } },
       position: { ...item.position },
+      ...(item.skeletonSteps ? { skeletonSteps: item.skeletonSteps.map((step) => ({ ...step })) } : {}),
+      ...(item.restorePosition ? { restorePosition: { ...item.restorePosition } } : {}),
       ...(item.trendColumns ? { trendColumns: item.trendColumns.slice() } : {}),
       ...(item.trendColumnsOpen !== undefined ? { trendColumnsOpen: item.trendColumnsOpen } : {})
     };
@@ -162,8 +218,8 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
     if (disposed) return "";
     idCounter += 1;
     const id = `deep-${idCounter}`;
-    const offset = windows.value.length % 4;
-    const position = openOptions.position || { x: 24 + offset * 28, y: 24 + offset * 28 };
+    const position = openOptions.position || centeredPosition(windows.value.length);
+    const status = openOptions.status || "ready";
     windows.value = [...windows.value, {
       id,
       mode: result.sessionResult?.mode || "report",
@@ -175,18 +231,22 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
       minimized: false,
       pinned: false,
       overlay: false,
-      status: openOptions.status || "ready",
+      status,
       position: { x: boundedNumber(position.x, 24), y: boundedNumber(position.y, 24) },
-      canCancel: openOptions.status === "loading",
+      hidden: false,
+      canCancel: status === "loading",
       canAddMemory: true,
       addedToMemory: false,
-      canExport: openOptions.status !== "loading",
-      canMinimize: true,
-      canClose: true,
+      canExport: status !== "loading",
+      canMinimize: status !== "loading",
+      canClose: status !== "loading",
       trendColumnsOpen: false,
+      ...(openOptions.skeletonSteps?.length
+        ? { skeletonSteps: openOptions.skeletonSteps.map((step) => ({ ...step })) }
+        : {}),
       ...(result.sessionResult?.feedbackState ? { feedbackState: result.sessionResult.feedbackState } : {})
     }];
-    if (openOptions.status === "loading") controllers.set(id, new AbortController());
+    if (status === "loading") controllers.set(id, new AbortController());
     activeId = id;
     notify();
     return id;
@@ -194,20 +254,46 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
 
   function activate(id: string): void {
     const target = safeId(id);
-    if (target && windows.value.some((item) => item.id === target)) {
-      activeId = target;
-      notify();
-    }
+    const item = target ? find(target) : undefined;
+    if (!item) return;
+    activeId = target;
+    update(target, (current) => {
+      const next = {
+        ...current,
+        hidden: false,
+        zIndex: nextZIndex(windows.value)
+      };
+      if (current.hidden) {
+        next.minimized = false;
+        if (current.restorePosition) next.position = { ...current.restorePosition };
+        delete next.restorePosition;
+      }
+      return next;
+    });
   }
 
   function minimize(id?: string): void {
     const target = selectedId(id);
-    if (target) update(target, (item) => ({ ...item, minimized: true }));
+    const item = target ? find(target) : undefined;
+    if (!item || item.status === "loading" || item.minimized || item.hidden) return;
+    const minimizedCount = windows.value.filter((current) => current.minimized && !current.hidden).length;
+    update(target!, (current) => ({
+      ...current,
+      minimized: true,
+      restorePosition: { ...current.position },
+      position: minimizedPosition(minimizedCount)
+    }));
   }
 
   function restore(id?: string): void {
     const target = selectedId(id);
-    if (target) update(target, (item) => ({ ...item, minimized: false }));
+    if (!target) return;
+    update(target, (item) => {
+      const next = { ...item, minimized: false };
+      if (item.restorePosition) next.position = { ...item.restorePosition };
+      delete next.restorePosition;
+      return next;
+    });
   }
 
   function close(id?: string): void {
@@ -215,9 +301,13 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
     if (!target) return;
     controllers.get(target)?.abort();
     controllers.delete(target);
-    windows.value = windows.value.filter((item) => item.id !== target);
-    if (activeId === target) activeId = windows.value.at(-1)?.id || null;
-    notify();
+    if (activeId === target) {
+      activeId = windows.value
+        .slice()
+        .reverse()
+        .find((item) => item.id !== target && !item.hidden)?.id || null;
+    }
+    update(target, (item) => ({ ...item, hidden: true }));
   }
 
   function pin(id?: string, pinned?: boolean): boolean {
@@ -273,26 +363,18 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
     const target = selectedId(id);
     if (!target) return false;
     const item = find(target);
-    if (!item || item.status !== "loading") {
-      return item ? update(target, (current) => ({
-        ...current,
-        status: "cancelled",
-        minimized: false,
-        canCancel: false,
-        canAddMemory: false,
-        canExport: false
-      })) : false;
-    }
+    if (!item || item.status !== "loading") return false;
     controllers.get(target)?.abort();
     controllers.delete(target);
-    return update(target, (current) => ({
-      ...current,
-      status: "cancelled",
-      minimized: false,
-      canCancel: false,
-      canAddMemory: false,
-      canExport: false
-    }));
+    windows.value = windows.value.filter((current) => current.id !== target);
+    if (activeId === target) {
+      activeId = windows.value
+        .slice()
+        .reverse()
+        .find((current) => !current.hidden)?.id || null;
+    }
+    notify();
+    return true;
   }
 
   function addToChat(id?: string): boolean {
@@ -330,19 +412,35 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
     return update(target, (item) => ({ ...item, trendColumns: next }));
   }
 
-  function updateResult(id: string, result: ChatbotReportViewResult): boolean {
+  function updateSkeleton(id: string, activeStep: number): boolean {
+    const target = safeId(id);
+    const item = target ? find(target) : undefined;
+    if (!item?.skeletonSteps?.length) return false;
+    const next = skeletonStepsForActiveStep(item.skeletonSteps, activeStep);
+    return update(target!, (current) => ({ ...current, skeletonSteps: next }));
+  }
+
+  function updateResult(id: string, result: ChatbotReportViewResult, statusOverride?: DeepWindowStatus): boolean {
     const target = safeId(id);
     if (!target || !find(target)) return false;
+    const nextStatus = statusOverride || (
+      result.sessionResult?.status === "stopped" || result.status === "deferred"
+        ? "cancelled"
+        : result.sessionResult?.ok === false ? "error" : "ready"
+    );
     return update(target, (item) => ({
       ...item,
       result,
-      title: result.title || result.category || result.tier || result.message || result.intent,
+      title: result.title || result.category || result.tier || result.message || result.query || result.intent,
       summary: result.message,
       ...(result.contentHtml ? { contentHtml: result.contentHtml } : { contentHtml: undefined }),
-      status: result.status === "deferred" ? "cancelled" : "ready",
+      ...(nextStatus === "error" ? { errorMessage: result.message } : { errorMessage: undefined }),
+      status: nextStatus,
       canCancel: false,
-      canExport: result.status !== "deferred",
-      canAddMemory: result.status !== "deferred"
+      canExport: nextStatus === "ready",
+      canAddMemory: nextStatus === "ready",
+      canMinimize: nextStatus !== "loading",
+      canClose: nextStatus !== "loading"
     }));
   }
 
@@ -393,6 +491,7 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
     addToChat,
     interact,
     setTrendColumns,
+    updateSkeleton,
     updateResult,
     onChange,
     dispose

@@ -143,6 +143,17 @@ describe("createChatbotSession", () => {
     expect(chatSession.getState().utility?.onboardingStep).not.toBe(4);
   });
 
+  it("报告执行通过回调暴露理解、查询、生成三个阶段", async () => {
+    const stages: string[] = [];
+    const session = createChatbotSession({ offers, language: "en", llmEnabled: false, enableQuestionLogging: false });
+
+    await session.submit("Tapo", {
+      onProgress: (stage) => stages.push(stage)
+    });
+
+    expect(stages).toEqual(["understand", "query", "report"]);
+  });
+
   it("uses the cached report model and exposes a structured snapshot", async () => {
     const session = createChatbotSession({ offers, language: "zh", llmEnabled: false, enableQuestionLogging: false });
 
@@ -151,6 +162,29 @@ describe("createChatbotSession", () => {
     expect(result).toMatchObject({ ok: true, mode: "report", source: "cache" });
     expect(result.report).toMatchObject({ intent: "merchant", query: "Tapo ID398679", rows: offers });
     expect(session.getState()).toMatchObject({ status: "success", hasMemory: false });
+  });
+
+  it("Deep Window 趋势的核心列保持旧版九项指标，而不是前三个结构列", async () => {
+    const session = createChatbotSession({
+      offers: [{
+        ...parityOffers[0],
+        monthly: [
+          { month: "2026-07", revenue: 4000, orders: 40, clicks: 800, affiliatePayout: 200 },
+          { month: "2026-08", revenue: 5000, orders: 50, clicks: 1000, affiliatePayout: 250 }
+        ]
+      }],
+      language: "zh",
+      llmEnabled: false,
+      enableQuestionLogging: false
+    });
+
+    const result = await session.submit("Alpha Audio 近 3 个月趋势");
+    expect(result.ok).toBe(true);
+    expect(session.interactContext?.("trend-column-core")).toBe(true);
+    const trend = session.getState().currentResult?.document?.blocks.find((block) => block.kind === "trend");
+    expect(trend && trend.kind === "trend" ? trend.visibleColumns : []).toEqual([
+      "month", "salesAmount", "orders", "epc", "aov", "clicks", "affiliatePayout", "dpv", "atc", "conversionRate", "deltaPct"
+    ]);
   });
 
   it("keeps Chat Mode streaming, usage, and successful history separate from stopped turns", async () => {

@@ -311,14 +311,22 @@ function classificationData(value: unknown): { intent: ReportIntent | null; para
   return { intent, params };
 }
 
-function explicitIntent(prompt: string): { intent: ReportIntent | null; command: boolean; publisherQuery?: string } {
+function explicitIntent(prompt: string): { intent: ReportIntent | null; command: boolean; commandName?: string; target?: string; publisherQuery?: string } {
   const trimmed = prompt.trim();
-  const match = trimmed.match(/^\/(publisherprofile|publisher|keyword|keywords|asin|merchant|payment|recommendation|tier|categorytier|category|trend|analysis|help)\s*[:：]?\s*(.*)$/i)
-    || trimmed.match(/^(publisherprofile|publisher|keyword|keywords|asin|merchant|payment|recommendation|tier|categorytier|category|trend|analysis|help)\s*[:：]\s*(.*)$/i);
+  const match = trimmed.match(/^\/(publisherprofile|publisher|keyword|keywords|asin|merchant|payment|recommendation|tier|categorytier|category\s*(?:\+|&)\s*tier|category|trend|analysis|help|品类\s*(?:\+|和|与)\s*tier)\s*[:：]?\s*(.*)$/i)
+    || trimmed.match(/^(publisherprofile|publisher|keyword|keywords|asin|merchant|payment|recommendation|tier|categorytier|category\s*(?:\+|&)\s*tier|category|trend|analysis|help|品类\s*(?:\+|和|与)\s*tier)\s*[:：]\s*(.*)$/i);
   if (!match) return { intent: null, command: false };
   const raw = text(match[1]).toLowerCase();
-  const intent = raw === "keywords" ? "keyword" : raw === "trend" ? "analysis" : raw === "categorytier" ? "category" : raw as ReportIntent;
-  return { intent, command: true, publisherQuery: intent === "publisherprofile" ? text(match[2]) : undefined };
+  const compact = raw.replace(/\s+/g, "");
+  const commandName = /^(?:category[+&]tier|品类[+和与]tier)$/i.test(compact) ? "categorytier" : raw;
+  const intent = commandName === "keywords" ? "keyword" : commandName === "trend" ? "analysis" : commandName === "categorytier" ? "category" : commandName as ReportIntent;
+  return {
+    intent,
+    command: true,
+    commandName,
+    target: text(match[2]),
+    publisherQuery: commandName === "publisherprofile" ? text(match[2]) : undefined
+  };
 }
 
 function inferPublisherTarget(prompt: string): string {
@@ -352,22 +360,34 @@ function unique(values: readonly string[]): string[] {
   return Array.from(new Set(values.map(text).filter(Boolean)));
 }
 
-function queryWithDefaults(prompt: string, language: QueryContext["language"], intent: ReportIntent, parsedBy: ReportQuery["parsedBy"], params: RecordValue, context: QueryContext, publisherQuery?: string): ReportQuery {
+function queryWithDefaults(prompt: string, language: QueryContext["language"], intent: ReportIntent, parsedBy: ReportQuery["parsedBy"], params: RecordValue, context: QueryContext, publisherQuery?: string, commandTarget?: string, commandName?: string): ReportQuery {
   const now = context.now || new Date();
-  const tiers = extractTiers(prompt, params);
+  const parsePrompt = commandTarget !== undefined ? commandTarget : prompt;
+  const tiers = extractTiers(parsePrompt, params);
   const categoriesFromParams = list(params.category || params.categories);
-  const categories = unique(categoriesFromParams.length ? categoriesFromParams : [resolveChatbotCategory(prompt, context.categories) || ""]);
+  const categories = unique(categoriesFromParams.length ? categoriesFromParams : [resolveChatbotCategory(parsePrompt, context.categories) || ""]);
+  const merchantPrompt = parsePrompt;
   const promptIds = intent === "publisher" || intent === "publisherprofile"
     ? []
-    : [...prompt.matchAll(/(?:merchant\s*(?:id)?|商户\s*(?:ID|编号)?)\s*[:#：]?\s*(\d{3,})/gi)].map((match) => text(match[1]));
-  const bareId = /^\s*\d{3,}\s*$/.test(prompt) ? [prompt.trim()] : [];
+    : [...merchantPrompt.matchAll(/(?:merchant\s*(?:id)?|商户\s*(?:ID|编号)?)\s*[:#：]?\s*(\d{3,})/gi)].map((match) => text(match[1]));
+  const bareId = /^\s*\d{3,}\s*$/.test(merchantPrompt) ? [merchantPrompt.trim()] : [];
   const merchantIds = unique([...list(params.merchantId), ...list(params.merchantIds), ...promptIds, ...bareId]).filter((value) => /^\d+$/.test(value));
   const merchantNames = unique([...list(params.merchantName), ...list(params.merchantNames), ...list(params.analysisTarget)]).filter((value) => !/^\d+$/.test(value));
   if ((intent === "merchant" || intent === "analysis" || intent === "payment") && !merchantIds.length && !merchantNames.length && context.merchantCandidates?.length) {
-    const normalizedPrompt = normalizeChatbotText(prompt);
+    const normalizedPrompt = normalizeChatbotText(merchantPrompt);
     const matches = context.merchantCandidates.filter((candidate) => {
       const normalizedName = normalizeChatbotText(candidate.name);
-      return normalizedName.length >= 2 && (normalizedPrompt === normalizedName || normalizedPrompt.includes(normalizedName));
+      const directMatch = normalizedPrompt.length >= 2 && normalizedName.length >= 2 && (
+        normalizedPrompt === normalizedName
+        || normalizedPrompt.includes(normalizedName)
+        || normalizedName.includes(normalizedPrompt)
+      );
+      const promptTokens = normalizedPrompt.split(/\s+/).filter((token) => token.length >= 3);
+      const nameTokens = normalizedName.split(/\s+/).filter((token) => token.length >= 3);
+      const commandTokenMatch = commandTarget !== undefined && promptTokens.some((promptToken) => nameTokens.some((nameToken) => (
+        promptToken === nameToken || promptToken.includes(nameToken) || nameToken.includes(promptToken)
+      )));
+      return directMatch || commandTokenMatch;
     });
     if (matches.length === 1) merchantIds.push(text(matches[0]!.id));
     if (matches.length > 1) {
@@ -377,13 +397,18 @@ function queryWithDefaults(prompt: string, language: QueryContext["language"], i
       else merchantNames.push(...matches.map((candidate) => text(candidate.name)));
     }
   }
-  const asins = extractAsins(prompt, params);
-  const analysisTargets = unique([...list(params.analysisTargets), ...list(params.analysisTarget), ...merchantIds, ...merchantNames]);
+  const asins = extractAsins(parsePrompt, params);
+  const analysisCommandTarget = commandTarget && intent === "analysis" && !merchantIds.length && !merchantNames.length && !tiers.length && !categories.length && !asins.length
+    ? [commandTarget]
+    : [];
+  const analysisTargets = unique([...list(params.analysisTargets), ...list(params.analysisTarget), ...merchantIds, ...merchantNames, ...analysisCommandTarget]);
   const explicitAnalysisType = text(params.analysisType).toLowerCase();
-  const analysisType = ["merchant", "category", "tier", "trend"].includes(explicitAnalysisType)
+  const analysisType = commandName === "trend"
+    ? "trend"
+    : ["merchant", "category", "tier", "trend"].includes(explicitAnalysisType)
     ? explicitAnalysisType as ReportQuery["analysisType"]
     : intent === "analysis"
-      ? /趋势|trend|近\s*\d+\s*个月|last\s*\d+\s*months?/i.test(prompt)
+      ? commandName === "trend" || /趋势|trend|近\s*\d+\s*个月|last\s*\d+\s*months?/i.test(parsePrompt)
         ? "trend"
         : tiers.length
           ? "tier"
@@ -391,27 +416,27 @@ function queryWithDefaults(prompt: string, language: QueryContext["language"], i
             ? "category"
             : "merchant"
       : undefined;
-  const countNumber = Number(params.count || params.limit || prompt.match(/(?:top|前|最多|取|推荐)\s*(\d{1,4})/i)?.[1] || prompt.match(/\b(\d{1,4})\s*(?:个|家|条|名)\b/i)?.[1]);
+  const countNumber = Number(params.count || params.limit || parsePrompt.match(/(?:top|前|最多|取|推荐)\s*(\d{1,4})/i)?.[1] || parsePrompt.match(/\b(\d{1,4})\s*(?:个|家|条|名)\b/i)?.[1]);
   const count = Number.isFinite(countNumber) && countNumber > 0 ? Math.floor(countNumber) : undefined;
   const plans = Array.isArray(params.tierOfferPlan) ? params.tierOfferPlan.flatMap((item) => {
     const record = asRecord(item);
     const resolved = record ? tier(record.tier) : null;
     const amount = record ? Number(record.count) : 0;
     return resolved && Number.isFinite(amount) && amount > 0 ? [{ tier: resolved, count: Math.floor(amount) }] : [];
-  }) : [...naturalTierPlan(prompt)];
-  const filters = metricFilters(params, prompt);
-  const status = paymentStatus(prompt, params);
-  const month = normalizeMonthValue(params.month || params.reportMonth, now) || extractMonth(prompt, now);
-  const range = monthRange(prompt, params, now);
+  }) : [...naturalTierPlan(parsePrompt)];
+  const filters = metricFilters(params, parsePrompt);
+  const status = paymentStatus(parsePrompt, params);
+  const month = normalizeMonthValue(params.month || params.reportMonth, now) || extractMonth(parsePrompt, now);
+  const range = monthRange(parsePrompt, params, now);
   const cycleRecord = asRecord(params.paymentCycleFilter);
   const cycleOperator = operator(cycleRecord?.operator);
   const cycleDays = Number(cycleRecord?.days ?? cycleRecord?.value);
-  const cycleMatch = prompt.match(/(?:payment\s*cycle|付款周期|付款周期为|周期)\s*(>=|<=|>|<|=|over|above|greater\s*than|more\s*than|at\s*least|below|under|less\s*than|大于等于|小于等于|大于|小于|等于|至少|超过|高于|低于|少于|不超过)?\s*(\d+)\s*(?:days?|天)?/i);
+  const cycleMatch = parsePrompt.match(/(?:payment\s*cycle|付款周期|付款周期为|周期)\s*(>=|<=|>|<|=|over|above|greater\s*than|more\s*than|at\s*least|below|under|less\s*than|大于等于|小于等于|大于|小于|等于|至少|超过|高于|低于|少于|不超过)?\s*(\d+)\s*(?:days?|天)?/i);
   const cycle = cycleOperator && Number.isFinite(cycleDays) ? { operator: cycleOperator, days: cycleDays } : cycleMatch?.[2]
     ? { operator: operator(cycleMatch[1]) || ">", days: Number(cycleMatch[2]) }
     : undefined;
   const issues: string[] = [];
-  const analysisTargetText = prompt
+  const analysisTargetText = parsePrompt
     .replace(/^\s*\/?(?:analysis|分析|trend|趋势)\s*[:：]?\s*/i, "")
     .replace(/近\s*\d+\s*个?月|last\s*\d+\s*months?/gi, "")
     .replace(/趋势|trend|整体|全局|全量|所有商户|all\s+merchants?|overall|global/gi, "")
@@ -425,9 +450,11 @@ function queryWithDefaults(prompt: string, language: QueryContext["language"], i
   if (intent === "category" && !categories.length && params.recommendCategories !== true) issues.push(language === "zh" ? "请提供品类目标。" : "Provide a category target.");
   const includeTier4 = params.includeTier4 === true || tiers.includes("Tier 4");
   const includeBlack = params.includeBlack === true || tiers.includes("BLACK TIER");
-  const keyword = text(params.keywordSearch || params.keyword) || undefined;
+  const keyword = text(params.keywordSearch || params.keyword)
+    || (intent === "keyword" && commandTarget !== undefined ? commandTarget : "")
+    || undefined;
   const lookupText = intent === "merchant" && !merchantIds.length && !merchantNames.length
-    ? prompt.replace(/^\s*\/?merchant\s*[:：]?\s*/i, "").trim()
+    ? merchantPrompt.replace(/^\s*\/?merchant\s*[:：]?\s*/i, "").trim()
     : "";
   if (intent === "merchant" && !lookupText && !merchantIds.length && !merchantNames.length) {
     issues.push(language === "zh" ? "请提供商户名称或商户 ID。" : "Provide a merchant name or ID.");
@@ -449,10 +476,10 @@ function queryWithDefaults(prompt: string, language: QueryContext["language"], i
     ...(keyword ? { keyword } : {}),
     ...(count ? { count } : {}),
     metricFilters: filters,
-    metricSort: parseMetricSort(params) || naturalMetricSort(prompt),
+    metricSort: parseMetricSort(params) || naturalMetricSort(parsePrompt),
     includeTier4,
     includeBlack,
-    recommendCategories: params.recommendCategories === true || /推荐品类|recommended categories|best categories|品类排名/i.test(prompt),
+    recommendCategories: params.recommendCategories === true || /推荐品类|recommended categories|best categories|品类排名/i.test(parsePrompt),
     tierOfferPlan: plans,
     excludeMerchantIds: unique(list(params.excludeMerchantIds || params.excludeMerchantId)),
     replaceMerchantIds: unique(list(params.replaceMerchantIds || params.replaceMerchantId)),
@@ -462,10 +489,10 @@ function queryWithDefaults(prompt: string, language: QueryContext["language"], i
     ...(cycle ? { paymentCycleFilter: cycle } : {}),
     ...(analysisType ? { analysisType } : {}),
     analysisTargets,
-    ...(Number(params.months) >= 2 ? { months: Math.min(24, Math.floor(Number(params.months))) } : /近\s*(\d+)\s*个月|last\s*(\d+)\s*months?/i.test(prompt) ? { months: Math.min(24, Math.max(2, Number(prompt.match(/(?:近|last\s*)(\d+)/i)?.[1] || 3))) } : {}),
-    ...((params.trendMetric && trendMetricValue(params.trendMetric)) || naturalMetricSort(prompt)?.field ? { trendMetric: (trendMetricValue(params.trendMetric) || naturalMetricSort(prompt)?.field) as TrendMetric } : {}),
+    ...(Number(params.months) >= 2 ? { months: Math.min(24, Math.floor(Number(params.months))) } : /近\s*(\d+)\s*个月|last\s*(\d+)\s*months?/i.test(parsePrompt) ? { months: Math.min(24, Math.max(2, Number(parsePrompt.match(/(?:近|last\s*)(\d+)/i)?.[1] || 3))) } : {}),
+    ...((params.trendMetric && trendMetricValue(params.trendMetric)) || naturalMetricSort(parsePrompt)?.field ? { trendMetric: (trendMetricValue(params.trendMetric) || naturalMetricSort(parsePrompt)?.field) as TrendMetric } : {}),
     ...(publisherQuery !== undefined ? { publisherQuery } : {}),
-    publisherFilters: publisherFilters(prompt, params)
+    publisherFilters: publisherFilters(parsePrompt, params)
   };
 }
 
@@ -528,7 +555,8 @@ export function resolveReportQuery(prompt: string, context: QueryContext): Repor
   const effectiveIntent: ReportIntent = categoryOnly ? "category" : intent;
   const effectiveParsedBy: ReportQuery["parsedBy"] = categoryOnly && parsedBy === "rule" ? "rule" : parsedBy;
   const publisherTarget = explicit.publisherQuery || (!explicit.command && effectiveIntent === "publisherprofile" ? inferPublisherTarget(input) : undefined);
-  const query = queryWithDefaults(input, context.language, effectiveIntent, effectiveParsedBy, params, context, publisherTarget);
+  const commandTarget = explicit.command ? explicit.target : undefined;
+  const query = queryWithDefaults(input, context.language, effectiveIntent, effectiveParsedBy, params, context, publisherTarget, commandTarget, explicit.commandName);
   if (intent === "publisherprofile" && !query.publisherQuery) {
     return { ...query, publisherQuery: query.merchantNames[0] || query.merchantIds[0] || "" };
   }

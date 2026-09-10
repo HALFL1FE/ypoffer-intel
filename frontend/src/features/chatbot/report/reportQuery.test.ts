@@ -43,6 +43,68 @@ describe("resolveReportQuery", () => {
     });
   });
 
+  it("把 merchant 命令的目标交给统一商户解析器", () => {
+    const query = resolveReportQuery("merchant: shokz", {
+      language: "zh",
+      categories: [],
+      merchantCandidates: [{ id: "362653", name: "Shokz Official" }]
+    });
+
+    expect(query).toMatchObject({ intent: "merchant", merchantIds: ["362653"] });
+    expect(query.lookupText).toBeUndefined();
+  });
+
+  it("所有命令都只用前缀判断意图，并解析冒号后的参数", () => {
+    const context = {
+      language: "zh" as const,
+      categories: ["Electronics"],
+      merchantCandidates: [{ id: "362653", name: "Shokz Official" }]
+    };
+
+    expect(resolveReportQuery("payment: shokz 未付款", context)).toMatchObject({
+      intent: "payment",
+      paymentStatus: "Unpaid",
+      merchantIds: ["362653"]
+    });
+    expect(resolveReportQuery("analysis: shokz", context)).toMatchObject({
+      intent: "analysis",
+      analysisType: "merchant",
+      merchantIds: ["362653"]
+    });
+    expect(resolveReportQuery("trend: shokz", context)).toMatchObject({
+      intent: "analysis",
+      analysisType: "trend",
+      merchantIds: ["362653"]
+    });
+    expect(resolveReportQuery("品类 + Tier: Electronics Tier 2", context)).toMatchObject({
+      intent: "category",
+      parsedBy: "command",
+      categories: ["Electronics"],
+      tiers: ["Tier 2"]
+    });
+    expect(resolveReportQuery("Category & Tier: Electronics Tier 2", {
+      ...context,
+      language: "en"
+    })).toMatchObject({
+      intent: "category",
+      parsedBy: "command",
+      categories: ["Electronics"],
+      tiers: ["Tier 2"]
+    });
+    expect(resolveReportQuery("recommendation: Electronics 前 2 个", context)).toMatchObject({
+      intent: "recommendation",
+      categories: ["Electronics"],
+      count: 2
+    });
+    expect(resolveReportQuery("keyword: headphones", context)).toMatchObject({ intent: "keyword", keyword: "headphones" });
+    expect(resolveReportQuery("asin: B000000001", context)).toMatchObject({ intent: "asin", asins: ["B000000001"] });
+    expect(resolveReportQuery("publisher: Germany ShareASale", context)).toMatchObject({
+      intent: "publisher",
+      publisherFilters: { market: "amazon.de", network: "ShareASale" }
+    });
+    expect(resolveReportQuery("help:", context)).toMatchObject({ intent: "help", parsedBy: "command" });
+  });
+
   it("supports report follow-up using the previous unique merchant", () => {
     const query = resolveReportQuery("EPC 呢", {
       language: "zh",

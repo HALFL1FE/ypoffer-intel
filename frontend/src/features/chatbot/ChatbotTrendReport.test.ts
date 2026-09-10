@@ -31,6 +31,9 @@ describe("ChatbotTrendReport", () => {
 
     expect(wrapper.find("svg").exists()).toBe(true);
     expect(wrapper.findAll("tbody tr")).toHaveLength(2);
+    expect(wrapper.find("[data-trend-summary]").exists()).toBe(true);
+    expect(wrapper.findAll("[data-trend-summary-card]")).toHaveLength(1);
+    expect(wrapper.find("[data-trend-summary-card]").text()).toContain("+20.0%");
     expect(wrapper.text()).toContain("不可用");
     expect(wrapper.text()).toContain("20.00%");
 

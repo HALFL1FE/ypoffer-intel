@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 
 import { renderMarkdownToHtml } from "../../shared/markdown/markdown";
 import type { UiLanguage } from "../../shared/i18n";
@@ -51,8 +51,6 @@ const emit = defineEmits<{
   (event: "download", downloadId: string, answerId?: string): void;
 }>();
 
-const starterCollapsed = ref(false);
-
 const hasPerAnswerFeedback = computed(() => props.messages.some((message) =>
   message.role === "assistant" && !message.streaming &&
   (message.feedbackState === "available" || message.feedbackState === "submitted")
@@ -73,8 +71,6 @@ const copy = computed(() => props.language === "zh" ? {
   noMemory: "尚未加入报告。可先在 Report Mode 生成一份报告。",
   remove: "移除报告",
   error: "回答暂时不可用，请重试。",
-  starter: "继续追问",
-  starterToggle: "切换提问示例",
   chatReminderKicker: "Chat Mode",
   chatReminderTitle: "把报告放进记忆栏，再开始对话",
   chatReminderBody: "Chat Mode 可以根据记忆内容做解释、归纳、横向比较和行动建议",
@@ -96,8 +92,6 @@ const copy = computed(() => props.language === "zh" ? {
   noMemory: "No report has been added yet. Start in Report Mode first.",
   remove: "Remove report",
   error: "The response is temporarily unavailable. Try again.",
-  starter: "Continue asking",
-  starterToggle: "Toggle question examples",
   chatReminderKicker: "Chat Mode",
   chatReminderTitle: "Bring a report into memory, then start the conversation",
   chatReminderBody: "Chat Mode can explain, summarize, compare side by side, and suggest actions based on memory content.",
@@ -218,7 +212,7 @@ function handleReminderInteraction(event: MouseEvent): void {
           </aside>
           <article v-for="message in messages" :key="message.id" class="message" :class="message.role" :data-chatbot-answer-id="message.role === 'assistant' ? (message.answerId || message.id) : undefined">
             <div v-if="message.role === 'assistant'" class="chat-stream-text" v-html="messageHtml(message)"></div>
-            <div v-else class="chat-stream-text"><p>{{ message.content }}</p></div>
+            <div v-else class="chat-stream-text chatbot-user-message"><p>{{ message.content }}</p></div>
             <span v-if="message.streaming" class="chatbot-chat-cursor" aria-hidden="true"></span>
             <ChatAnswerActions
               v-if="message.role === 'assistant' && !message.streaming && (message.canOpenDeep || message.feedbackState === 'available' || message.feedbackState === 'submitted')"
@@ -244,42 +238,6 @@ function handleReminderInteraction(event: MouseEvent): void {
             <span class="chat-memory-dropzone-icon" aria-hidden="true">+</span>
             <span class="chat-memory-hint">{{ memory.length ? copy.memory : copy.noMemory }}</span>
           </div>
-          <section v-if="starterCards?.length" class="chat-memory-starter is-in" :class="{ collapsed: starterCollapsed }" data-chatbot-starter>
-            <div class="chat-memory-starter-core">
-              <div class="chat-memory-starter-head">
-                <span class="chat-memory-starter-eyebrow">{{ copy.starter }} · {{ starterCards.length }}</span>
-                <button
-                  class="chat-memory-starter-toggle"
-                  type="button"
-                  data-chatbot-starter-toggle
-                  :aria-expanded="!starterCollapsed"
-                  :aria-label="copy.starterToggle"
-                  @click="starterCollapsed = !starterCollapsed"
-                ><span class="chat-memory-starter-chevron" aria-hidden="true"></span></button>
-              </div>
-              <div v-if="!starterCollapsed" class="chat-memory-starter-body">
-                <article v-for="card in starterCards" :key="card.id" class="chat-memory-starter-group">
-                  <div class="chat-memory-starter-group-head">
-                    <span class="chat-memory-starter-type is-generic">
-                      <span class="chat-memory-starter-type-dot" aria-hidden="true"></span>
-                      <span class="chat-memory-starter-type-text">{{ card.type }}</span>
-                    </span>
-                    <span class="chat-memory-starter-title">{{ card.title }}</span>
-                  </div>
-                  <div class="chat-memory-starter-chips">
-                    <button
-                      v-for="question in card.questions"
-                      :key="question"
-                      type="button"
-                      class="starter-chip"
-                      data-chatbot-starter-question
-                      @click="emit('starter-prompt', question)"
-                    >{{ question }}</button>
-                  </div>
-                </article>
-              </div>
-            </div>
-          </section>
         </section>
       <div class="chat-mode-toggle" role="tablist" aria-label="Chatbot mode">
         <slot name="mode-controls"></slot>

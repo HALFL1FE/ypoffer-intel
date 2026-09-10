@@ -12,6 +12,7 @@ import { useChatbotReport } from "./useChatbotReport";
 import {
   createDeepWindowStore,
   type DeepWindowInteraction,
+  type DeepWindowSkeletonStep,
   type DeepWindowState,
   type DeepWindowStore,
   type DeepWindowViewState
@@ -23,6 +24,8 @@ import type {
   ChatbotHistoryMessage,
   ChatbotMemoryItem,
   ChatbotMode,
+  ChatbotReportProgressStage,
+  ChatbotReportHistoryItem,
   ChatbotReportViewResult,
   ChatbotSession,
   ChatbotSessionMessage,
@@ -59,6 +62,7 @@ const chatInput = ref("");
 const chatLoading = ref(false);
 const chatError = ref("");
 const chatMessages = ref<Array<ChatbotHistoryMessage & Partial<ChatbotSessionMessage> & { readonly id: string; readonly streaming?: boolean }>>([]);
+const reportHistory = ref<ChatbotReportHistoryItem[]>([]);
 const chatCurrentResult = ref<ChatbotSessionResult | null>(null);
 const starterCards = ref<readonly ChatbotStarterCard[]>([]);
 const memory = ref<ChatbotMemoryItem[]>([]);
@@ -81,10 +85,12 @@ const localDeepWindows = createDeepWindowStore({
 });
 const deepWindowController = props.deepWindows || localDeepWindows;
 let chatAbortController: AbortController | null = null;
+let pendingReportDeepWindowId: string | null = null;
 let stopSessionSubscription: (() => void) | null = null;
 const deepWindowsState = ref<DeepWindowViewState>(deepWindowController.getState());
 let stopDeepWindowSubscription: (() => void) | null = null;
 let idCounter = 0;
+const MAX_REPORT_HISTORY = 50;
 
 const copy = computed(() => props.language === "zh" ? {
   title: "Chatbot",
@@ -125,6 +131,24 @@ function nextId(prefix: string): string {
 
 function reportText(result: ChatbotReportViewResult): string {
   return result.message || `${result.intent} report`;
+}
+
+function rememberReportView(view: ChatbotReportViewResult): void {
+  const answerId = view.sessionResult?.answerId?.trim() || "";
+  const existingIndex = answerId
+    ? reportHistory.value.findIndex((item) => item.id === answerId || item.result.sessionResult?.answerId === answerId)
+    : reportHistory.value.findIndex((item) => item.result.sessionResult === view.sessionResult);
+  if (existingIndex >= 0) {
+    reportHistory.value = reportHistory.value.map((item, index) => index === existingIndex
+      ? { ...item, query: view.query, result: view }
+      : item);
+    return;
+  }
+  reportHistory.value = [...reportHistory.value, {
+    id: answerId || nextId("report"),
+    query: view.query,
+    result: view
+  }].slice(-MAX_REPORT_HISTORY);
 }
 
 function downloadLogs(kind: "questions" | "feedback", format: "csv" | "jsonl"): void {
@@ -181,7 +205,13 @@ function feedbackForDeepWindow(windowId: string): ReturnType<NonNullable<Chatbot
 }
 
 function sessionResultToView(result: ChatbotSessionResult, query: string): ChatbotReportViewResult {
-  if (result.report) return { ...result.report, sessionResult: result };
+  if (result.report) return {
+    ...result.report,
+    ...(result.document ? { document: result.document } : {}),
+    ...(result.contentHtml ? { contentHtml: result.contentHtml } : {}),
+    ...(result.recommendationHtml ? { recommendationHtml: result.recommendationHtml } : {}),
+    sessionResult: result
+  };
   const status: ChatbotReportViewResult["status"] = result.status === "success"
     ? "resolved" : result.status === "stopped" ? "deferred" : "not_found";
   return {
@@ -206,7 +236,45 @@ function sessionResultToView(result: ChatbotSessionResult, query: string): Chatb
   };
 }
 
-const displayedDeepWindows = computed<readonly DeepWindowState[]>(() => deepWindowsState.value.windows);
+function placeholderReportView(query: string, message: string): ChatbotReportViewResult {
+  return {
+    intent: "analysis",
+    status: "deferred",
+    query,
+    source: "unavailable",
+    rows: [],
+    summary: {
+      offerCount: 0,
+      clicks: 0,
+      orders: 0,
+      revenue: 0,
+      commission: 0,
+      conversionRate: null
+    },
+    message,
+    title: query
+  };
+}
+
+function loadingReportView(query: string): ChatbotReportViewResult {
+  return placeholderReportView(query, props.language === "zh" ? "正在生成分析报告…" : "Generating analysis report…");
+}
+
+function reportSkeletonSteps(): readonly DeepWindowSkeletonStep[] {
+  return [
+    { id: "understand", label: props.language === "zh" ? "理解问题" : "Understanding your question", state: "active" },
+    { id: "query", label: props.language === "zh" ? "查询数据" : "Querying data", state: "pending" },
+    { id: "report", label: props.language === "zh" ? "生成报告" : "Generating report", state: "pending" }
+  ];
+}
+
+function reportSkeletonStepForStage(stage: ChatbotReportProgressStage): number {
+  return stage === "understand" ? 1 : stage === "query" ? 2 : 3;
+}
+
+const displayedDeepWindows = computed<readonly DeepWindowState[]>(() => (
+  deepWindowsState.value.windows.filter((item) => !item.hidden)
+));
 
 const activeDisplayedDeepWindow = computed<DeepWindowState | null>(() => {
   const activeId = deepWindowsState.value.activeId;
@@ -241,12 +309,15 @@ function syncSessionState(next: ChatbotViewState = props.session!.getState()): v
   memory.value = sessionMemoryToLocal(next);
   starterCards.value = next.starterCards || [];
   chatCurrentResult.value = next.currentResult?.mode === "chat" ? next.currentResult : null;
+  const previousMessages = chatMessages.value;
   const lastAssistantIndex = next.messages.reduce(
     (index, message, currentIndex) => message.role === "assistant" ? currentIndex : index,
     -1
   );
   chatMessages.value = next.messages.map((message, messageIndex) => ({
-    id: message.id || message.answerId || nextId(message.role === "user" ? "user" : "assistant"),
+    id: message.id || message.answerId || (previousMessages[messageIndex]?.role === message.role
+      ? previousMessages[messageIndex]?.id
+      : undefined) || `${message.role}-${messageIndex}`,
     role: message.role,
     content: message.content,
     ...(message.answerId ? { answerId: message.answerId } : {}),
@@ -259,17 +330,20 @@ function syncSessionState(next: ChatbotViewState = props.session!.getState()): v
       : {})
   }));
   if (next.currentResult && next.currentResult.mode === "report") {
-    reportResult.value = sessionResultToView(next.currentResult, reportPrompt.value || reportResult.value?.query || "");
+    const view = sessionResultToView(next.currentResult, reportPrompt.value || reportResult.value?.query || "");
+    reportResult.value = view;
+    rememberReportView(view);
     report.hasError.value = next.currentResult.ok === false;
     const answerId = next.currentResult.answerId;
     if (answerId) {
-      const refreshedView = sessionResultToView(next.currentResult, reportPrompt.value || reportResult.value?.query || "");
+      const refreshedView = view;
       deepWindowsState.value.windows
         .filter((item) => item.result.sessionResult?.answerId === answerId)
         .forEach((item) => deepWindowController.updateResult(item.id, refreshedView));
     }
   } else if (!next.currentResult) {
     reportResult.value = null;
+    reportHistory.value = [];
     report.hasError.value = false;
   }
 }
@@ -286,32 +360,76 @@ async function submitReport(): Promise<void> {
     reportLoading.value = true;
     report.hasError.value = false;
     chatAbortController = new AbortController();
+    const deepWindowId = deepWindowController.open(loadingReportView(query), {
+      status: "loading",
+      skeletonSteps: reportSkeletonSteps()
+    });
+    pendingReportDeepWindowId = deepWindowId;
     try {
-      const result = await props.session.submit(query, { signal: chatAbortController.signal });
-      reportResult.value = sessionResultToView(result, query);
+      deepWindowController.updateSkeleton(deepWindowId, 2);
+      const result = await props.session.submit(query, {
+        signal: chatAbortController.signal,
+        onProgress: (stage) => deepWindowController.updateSkeleton(deepWindowId, reportSkeletonStepForStage(stage))
+      });
+      deepWindowController.updateSkeleton(deepWindowId, 3);
+      const view = sessionResultToView(result, query);
+      reportResult.value = view;
+      rememberReportView(view);
       report.hasError.value = !result.ok;
       feedbackRefreshKey.value += 1;
-      if (result.ok && !props.deepWindows) deepWindowController.close();
+      if (result.status === "stopped" || result.stopped) {
+        deepWindowController.cancel(deepWindowId);
+      } else {
+        deepWindowController.updateResult(deepWindowId, { ...view, title: query }, result.ok ? "ready" : "error");
+      }
+    } catch {
+      report.hasError.value = true;
+      deepWindowController.updateResult(deepWindowId, placeholderReportView(query, copy.value.reportError), "error");
     } finally {
+      if (pendingReportDeepWindowId === deepWindowId) pendingReportDeepWindowId = null;
       chatAbortController = null;
       reportLoading.value = false;
     }
     return;
   }
+  const query = reportPrompt.value.trim();
+  if (!query || reportLoading.value) return;
+  const deepWindowId = deepWindowController.open(loadingReportView(query), {
+    status: "loading",
+    skeletonSteps: reportSkeletonSteps()
+  });
+  deepWindowController.updateSkeleton(deepWindowId, 2);
   const result = await report.submit();
-  if (result) deepWindowController.close();
+  deepWindowController.updateSkeleton(deepWindowId, 3);
+  if (result) {
+    rememberReportView(result);
+    deepWindowController.updateResult(deepWindowId, { ...result, title: query }, "ready");
+  } else deepWindowController.updateResult(deepWindowId, placeholderReportView(query, copy.value.reportError), "error");
 }
 
-function openDeep(): void {
-  if (!reportResult.value) return;
-  const existingId = reportResult.value.sessionResult?.deepWindowId;
-  if (existingId && deepWindowsState.value.windows.some((item) => item.id === existingId)) {
-    deepWindowController.activate(existingId);
+function openDeep(historyId?: string): void {
+  const historyItem = historyId ? reportHistory.value.find((item) => item.id === historyId) : null;
+  const targetResult = historyItem?.result || reportResult.value;
+  if (!targetResult) return;
+  const existingId = targetResult.sessionResult?.deepWindowId;
+  const answerId = targetResult.sessionResult?.answerId;
+  const existing = deepWindowsState.value.windows.find((item) => (
+    (existingId && item.id === existingId)
+    || (answerId && item.result.sessionResult?.answerId === answerId)
+    || (!answerId && item.mode === "report" && item.result.query === targetResult.query)
+  ));
+  if (existing) {
+    deepWindowController.activate(existing.id);
     return;
   }
-  const sessionId = props.session?.openDeepWindow?.();
-  if (sessionId) deepWindowController.activate(sessionId);
-  else deepWindowController.open(reportResult.value);
+  if (!historyItem) {
+    const sessionId = props.session?.openDeepWindow?.();
+    if (sessionId) {
+      deepWindowController.activate(sessionId);
+      return;
+    }
+  }
+  deepWindowController.open(targetResult);
 }
 
 function openChatAnswer(answerId: string): void {
@@ -361,20 +479,8 @@ function activeDeepWindowId(): string | null {
   return activeDisplayedDeepWindow.value?.id || null;
 }
 
-function pinDeepWindowById(id: string): void {
-  deepWindowController.pin(id);
-}
-
 function moveDeepWindowById(id: string, x: number, y: number): void {
   deepWindowController.move(id, x, y);
-}
-
-function cloneDeepWindowById(id: string): void {
-  deepWindowController.clone(id);
-}
-
-function toggleDeepWindowOverlayById(id: string): void {
-  deepWindowController.toggleOverlay(id);
 }
 
 function exportDeepWindowById(id: string): void {
@@ -382,6 +488,7 @@ function exportDeepWindowById(id: string): void {
 }
 
 function cancelDeepWindowById(id: string): void {
+  if (pendingReportDeepWindowId === id) chatAbortController?.abort();
   deepWindowController.cancel(id);
 }
 
@@ -540,6 +647,7 @@ onBeforeUnmount(() => {
       :language="language"
       :prompt="reportPrompt"
       :result="reportResult"
+      :history="reportHistory"
       :context-title="contextTitle"
       :context-subtitle="contextSubtitle"
       :context-html="contextHtml"
@@ -731,8 +839,6 @@ onBeforeUnmount(() => {
       :language="language"
       :result="window.result"
       :minimized="window.minimized"
-      :pinned="window.pinned"
-      :overlay="window.overlay"
       :status="window.status"
       :position="window.position"
       :title="window.title"
@@ -749,16 +855,12 @@ onBeforeUnmount(() => {
       :can-close="window.canClose"
       :feedback-state="window.feedbackState"
       :feedback="feedbackForDeepWindow(window.id)"
-      :absolute-position="Boolean(props.deepWindows)"
       @activate="deepWindowController.activate(window.id)"
       @minimize="deepWindowController.minimize(window.id)"
       @restore="deepWindowController.restore(window.id)"
       @close="deepWindowController.close(window.id)"
       @add-memory="addDeepWindowToMemory(window.id)"
-      @pin="pinDeepWindowById(window.id)"
       @move="(x, y) => moveDeepWindowById(window.id, x, y)"
-      @clone="cloneDeepWindowById(window.id)"
-      @overlay="toggleDeepWindowOverlayById(window.id)"
       @export="exportDeepWindowById(window.id)"
       @cancel="cancelDeepWindowById(window.id)"
       @download="downloadRecommendation"
