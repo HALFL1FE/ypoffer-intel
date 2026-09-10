@@ -143,6 +143,17 @@ describe("createChatbotSession", () => {
     expect(chatSession.getState().utility?.onboardingStep).not.toBe(4);
   });
 
+  it("报告执行通过回调暴露理解、查询、生成三个阶段", async () => {
+    const stages: string[] = [];
+    const session = createChatbotSession({ offers, language: "en", llmEnabled: false, enableQuestionLogging: false });
+
+    await session.submit("Tapo", {
+      onProgress: (stage) => stages.push(stage)
+    });
+
+    expect(stages).toEqual(["understand", "query", "report"]);
+  });
+
   it("uses the cached report model and exposes a structured snapshot", async () => {
     const session = createChatbotSession({ offers, language: "zh", llmEnabled: false, enableQuestionLogging: false });
 

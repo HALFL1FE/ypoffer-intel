@@ -54,6 +54,7 @@ export interface DeepWindowViewState {
 export interface DeepWindowOpenOptions {
   readonly status?: DeepWindowStatus;
   readonly position?: { readonly x: number; readonly y: number };
+  readonly skeletonSteps?: readonly DeepWindowSkeletonStep[];
 }
 
 export interface DeepWindowStoreOptions {
@@ -80,6 +81,7 @@ export interface DeepWindowStore {
   addToChat(id?: string): boolean;
   interact(id: string, action: DeepWindowInteraction, value?: string): boolean;
   setTrendColumns(id: string, columns: readonly string[]): boolean;
+  updateSkeleton(id: string, activeStep: number): boolean;
   updateResult(id: string, result: ChatbotReportViewResult, status?: DeepWindowStatus): boolean;
   onChange(listener: (state: DeepWindowViewState) => void): () => void;
   dispose(): void;
@@ -121,6 +123,18 @@ function viewport(): { readonly width: number; readonly height: number } {
   };
 }
 
+function skeletonStepsForActiveStep(
+  steps: readonly DeepWindowSkeletonStep[],
+  activeStep: number
+): readonly DeepWindowSkeletonStep[] {
+  if (!steps.length || !Number.isFinite(activeStep)) return steps;
+  const target = Math.max(1, Math.min(steps.length, Math.trunc(activeStep)));
+  return steps.map((step, index) => ({
+    ...step,
+    state: index + 1 < target ? "done" : index + 1 === target ? "active" : "pending"
+  }));
+}
+
 function centeredPosition(windowCount: number): { readonly x: number; readonly y: number } {
   const { width, height } = viewport();
   const cascade = windowCount % 4;
@@ -159,6 +173,7 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
       ...item,
       result: { ...item.result, rows: item.result.rows.slice(), summary: { ...item.result.summary } },
       position: { ...item.position },
+      ...(item.skeletonSteps ? { skeletonSteps: item.skeletonSteps.map((step) => ({ ...step })) } : {}),
       ...(item.restorePosition ? { restorePosition: { ...item.restorePosition } } : {}),
       ...(item.trendColumns ? { trendColumns: item.trendColumns.slice() } : {}),
       ...(item.trendColumnsOpen !== undefined ? { trendColumnsOpen: item.trendColumnsOpen } : {})
@@ -226,6 +241,9 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
       canMinimize: status !== "loading",
       canClose: status !== "loading",
       trendColumnsOpen: false,
+      ...(openOptions.skeletonSteps?.length
+        ? { skeletonSteps: openOptions.skeletonSteps.map((step) => ({ ...step })) }
+        : {}),
       ...(result.sessionResult?.feedbackState ? { feedbackState: result.sessionResult.feedbackState } : {})
     }];
     if (status === "loading") controllers.set(id, new AbortController());
@@ -394,6 +412,14 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
     return update(target, (item) => ({ ...item, trendColumns: next }));
   }
 
+  function updateSkeleton(id: string, activeStep: number): boolean {
+    const target = safeId(id);
+    const item = target ? find(target) : undefined;
+    if (!item?.skeletonSteps?.length) return false;
+    const next = skeletonStepsForActiveStep(item.skeletonSteps, activeStep);
+    return update(target!, (current) => ({ ...current, skeletonSteps: next }));
+  }
+
   function updateResult(id: string, result: ChatbotReportViewResult, statusOverride?: DeepWindowStatus): boolean {
     const target = safeId(id);
     if (!target || !find(target)) return false;
@@ -465,6 +491,7 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
     addToChat,
     interact,
     setTrendColumns,
+    updateSkeleton,
     updateResult,
     onChange,
     dispose

@@ -139,7 +139,9 @@ body:has([data-modern-root])[data-dash-theme="light"] :is(.insight-panel, .chat-
   margin-left: 4px;
   vertical-align: text-bottom;
   background: var(--nav-active, #1d6fd6);
-  animation: chatbot-blink 1s steps(2, jump-none) infinite;
+  border-radius: 2px;
+  opacity: .72;
+  animation: none;
 }
 
 .chatbot-report-chat-panel .chat-mode-toggle,

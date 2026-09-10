@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 
 import type { UiLanguage } from "../../shared/i18n";
-import type { ChatbotAnswerFeedbackState, ChatbotFeedback } from "./chatbotViewTypes";
+import type { ChatbotAnswerFeedbackState, ChatbotFeedback, ChatbotReportHistoryItem } from "./chatbotViewTypes";
 import ChatAnswerActions from "./ChatAnswerActions.vue";
 import ChatbotCommandMenu from "./ChatbotCommandMenu.vue";
 import ChatbotResultView from "./ChatbotResultView.vue";
@@ -12,7 +12,7 @@ import type { ChatbotReportViewResult } from "./chatbotViewTypes";
 const emit = defineEmits<{
   (event: "update:prompt", value: string): void;
   (event: "submit"): void;
-  (event: "open-deep"): void;
+  (event: "open-deep", historyId?: string): void;
   (event: "add-memory"): void;
   (event: "open-answer", answerId: string): void;
   (event: "context-interact", action: string, value?: string): void;
@@ -27,6 +27,7 @@ const props = defineProps<{
   readonly contextTitle?: string;
   readonly contextSubtitle?: string;
   readonly contextHtml?: string;
+  readonly history?: readonly ChatbotReportHistoryItem[];
   readonly loading: boolean;
   readonly error: string;
   readonly autoFocus?: boolean;
@@ -89,6 +90,15 @@ const displayContextSubtitle = computed(() => props.contextSubtitle?.trim()
   || (props.result ? sourceLabel.value : copy.value.contextSubtitle));
 const contextRichHtml = computed(() => props.contextHtml?.trim() || props.result?.recommendationHtml?.trim() || "");
 const reportHasAnswerActions = computed(() => Boolean(props.answerId && props.answerFeedback));
+const reportHistory = computed<readonly ChatbotReportHistoryItem[]>(() => {
+  if (props.history?.length) return props.history;
+  if (!props.result) return [];
+  return [{
+    id: props.result.sessionResult?.answerId || `report-${props.result.query}`,
+    query: props.result.query,
+    result: props.result
+  }];
+});
 const commandMenu = ref<InstanceType<typeof ChatbotCommandMenu> | null>(null);
 
 function handleContextInteraction(event: Event): void {
@@ -127,14 +137,14 @@ function selectCommand(key: string): void {
   emit("update:prompt", commandLabel(key) + ": ");
 }
 
-function openReportSummary(): void {
-  emit("open-deep");
+function openReportSummary(historyId?: string): void {
+  emit("open-deep", historyId);
 }
 
-function handleReportSummaryKeydown(event: KeyboardEvent): void {
+function handleReportSummaryKeydown(event: KeyboardEvent, historyId?: string): void {
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
-    openReportSummary();
+    openReportSummary(historyId);
   }
 }
 </script>
@@ -210,25 +220,27 @@ function handleReportSummaryKeydown(event: KeyboardEvent): void {
               </p>
             </div>
           </aside>
-          <article v-if="result" class="message user">
-            <div class="chat-stream-text"><p>{{ result.query }}</p></div>
-          </article>
-          <article v-if="result" class="message assistant">
-            <div class="chat-stream-text">
-              <div
-                class="deep-summary-card"
-                data-chatbot-report-summary
-                role="button"
-                tabindex="0"
-                @click="openReportSummary"
-                @keydown="handleReportSummaryKeydown"
-              >
-                <h4>{{ copy.summaryPrefix }}{{ result.query }}</h4>
-                <p>{{ result.query }}</p>
-                <small>{{ copy.summaryClick }}</small>
+          <template v-for="item in reportHistory" :key="item.id">
+            <article class="message user" :data-chatbot-report-history-id="item.id">
+              <div class="chat-stream-text"><p>{{ item.query }}</p></div>
+            </article>
+            <article class="message assistant" :data-chatbot-report-history-id="item.id">
+              <div class="chat-stream-text">
+                <div
+                  class="deep-summary-card"
+                  data-chatbot-report-summary
+                  role="button"
+                  tabindex="0"
+                  @click="openReportSummary(item.id)"
+                  @keydown="handleReportSummaryKeydown($event, item.id)"
+                >
+                  <h4>{{ copy.summaryPrefix }}{{ item.query }}</h4>
+                  <p>{{ item.query }}</p>
+                  <small>{{ copy.summaryClick }}</small>
+                </div>
               </div>
-            </div>
-          </article>
+            </article>
+          </template>
           <article v-if="supplementalHtml" class="message assistant">
             <div class="chat-stream-text" data-chatbot-report-supplemental-chat v-html="supplementalHtml"></div>
           </article>

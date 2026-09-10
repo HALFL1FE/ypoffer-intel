@@ -700,6 +700,7 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
   }
 
   async function submitReport(prompt: string, callbacks: ChatbotRunCallbacks, signal: AbortSignal): Promise<ChatbotSessionResult> {
+    callbacks.onProgress?.("understand");
     let queryOffers: readonly Row[] = offers;
     try {
       const liveOffers = await reportProvider.offers(signal);
@@ -708,6 +709,7 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
       if (isRecord(error) && error.name === "AbortError") throw error;
       // 分类仍可使用 bootstrap/cache；报告引擎会再次复用同一提供器结果。
     }
+    callbacks.onProgress?.("query");
     let classification: ChatbotClassification | null = null;
     if (options.llmEnabled !== false) {
       try {
@@ -741,6 +743,7 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
         }
       } : {})
     });
+    callbacks.onProgress?.("report");
     const engineResult = await runReportEngine({
       query,
       language: currentLanguage,
@@ -781,10 +784,12 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
           ? `从报告记忆中选出 ${recommendation.selectedRows.length} 个商户：${recommendation.selectedRows.map((row) => String((row as Row).merchantName || (row as Row).brand || (row as Row).merchantId || "未知商户")).join("、")}。`
           : `Selected ${recommendation.selectedRows.length} merchants from report memory: ${recommendation.selectedRows.map((row) => String((row as Row).merchantName || (row as Row).brand || (row as Row).merchantId || "Unknown")).join(", ")}.`)
         : (currentLanguage === "zh" ? "报告记忆中没有符合条件的推荐结果。" : "No matching recommendation was found in report memory.");
+      const userMessageId = uuid("chat-user");
+      const assistantMessageId = uuid("chat-assistant");
       messages = [
         ...messages,
-        { role: "user", content: prompt } satisfies ChatbotSessionMessage,
-        { role: "assistant", content: response } satisfies ChatbotSessionMessage
+        { id: userMessageId, role: "user", content: prompt } satisfies ChatbotSessionMessage,
+        { id: assistantMessageId, role: "assistant", content: response } satisfies ChatbotSessionMessage
       ];
       history = [
         ...previousHistory,
@@ -799,10 +804,12 @@ export function createChatbotSession(options: ChatbotSessionOptions): ChatbotSes
         recommendationHtml: recommendationHtml(response, currentLanguage)
       };
     }
+    const userMessageId = uuid("chat-user");
+    const assistantMessageId = uuid("chat-assistant");
     messages = [
       ...messages,
-      { role: "user", content: prompt } satisfies ChatbotSessionMessage,
-      { role: "assistant", content: "" } satisfies ChatbotSessionMessage
+      { id: userMessageId, role: "user", content: prompt } satisfies ChatbotSessionMessage,
+      { id: assistantMessageId, role: "assistant", content: "" } satisfies ChatbotSessionMessage
     ];
     notify();
     const runner = options.runChat || streamChatbotReply;

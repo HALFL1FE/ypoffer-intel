@@ -5,7 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import ChatbotPage from "./ChatbotPage.vue";
 import { createChatbotSession } from "./chatbotSession";
 import type {
+  ChatbotChatRunner,
   ChatbotChatRequest,
+  ChatbotChatResult,
   ChatbotRunCallbacks,
   ChatbotSessionResult,
   ChatbotViewState
@@ -241,6 +243,8 @@ describe("ChatbotPage", () => {
     expect(wrapper.find('[data-deep-window]').exists()).toBe(true);
     expect(wrapper.get('[data-deep-window]').attributes("data-status")).toBe("loading");
     expect(wrapper.find('[data-deep-window-action="stop"]').exists()).toBe(true);
+    expect(wrapper.get('[data-deep-window-step][data-step-id="understand"]').attributes("data-step-state")).toBe("done");
+    expect(wrapper.get('[data-deep-window-step][data-step-id="query"]').attributes("data-step-state")).toBe("active");
 
     state = { ...state, status: "success", currentResult: result };
     resolveSubmit?.(result);
@@ -453,6 +457,31 @@ describe("ChatbotPage", () => {
     expect(wrapper.find('[data-deep-window]').exists()).toBe(true);
   });
 
+  it("在报告模式保留连续多轮问答", async () => {
+    const session = createChatbotSession({
+      offers,
+      language: "zh",
+      llmEnabled: false,
+      enableQuestionLogging: false
+    });
+    const wrapper = mount(ChatbotPage, {
+      props: { language: "zh", offers, session, autoFocus: false }
+    });
+
+    await wrapper.get('[data-chatbot-report-input]').setValue("Tapo ID398679");
+    await wrapper.get('[data-chatbot-report-form]').trigger("submit");
+    await flushPromises();
+    await wrapper.get('[data-chatbot-report-input]').setValue("Home Lamp ID398680");
+    await wrapper.get('[data-chatbot-report-form]').trigger("submit");
+    await flushPromises();
+
+    const reportLog = wrapper.get('[data-chatbot-report-log]');
+    expect(reportLog.findAll(".message.user")).toHaveLength(2);
+    expect(reportLog.text()).toContain("Tapo ID398679");
+    expect(reportLog.text()).toContain("Home Lamp ID398680");
+    session.dispose?.();
+  });
+
   it("reopens a session-owned report window after the user closes it", async () => {
     const session = createChatbotSession({
       offers,
@@ -510,6 +539,49 @@ describe("ChatbotPage", () => {
     await flushPromises();
 
     expect(runChat).toHaveBeenLastCalledWith(expect.objectContaining({ history: [] }), expect.any(Function));
+  });
+
+  it("does not recreate the streaming assistant bubble for every token", async () => {
+    let sendToken: ((token: string) => void) | undefined;
+    let release: (() => void) | undefined;
+    const runChat: ChatbotChatRunner = async (_request, onToken): Promise<ChatbotChatResult> => {
+      sendToken = onToken;
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { ok: true, response: "hello world" };
+    };
+    const session = createChatbotSession({
+      offers,
+      language: "en",
+      llmEnabled: false,
+      runChat,
+      enableQuestionLogging: false
+    });
+    const wrapper = mount(ChatbotPage, {
+      props: { language: "en", offers, session, autoFocus: false }
+    });
+
+    await wrapper.get('[data-chatbot-mode-button="chat"]').trigger("click");
+    await wrapper.get('[data-chatbot-input]').setValue("stream this");
+    const pending = wrapper.get('[data-chatbot-composer]').trigger("submit");
+    await nextTick();
+    await nextTick();
+    expect(sendToken).toBeTypeOf("function");
+
+    const selector = '[data-chatbot-chat-log] .message.assistant';
+    const firstElement = wrapper.get(selector).element;
+    sendToken?.("hello");
+    await nextTick();
+    await nextTick();
+    expect(wrapper.get(selector).element).toBe(firstElement);
+    sendToken?.(" world");
+    await nextTick();
+    await nextTick();
+    expect(wrapper.get(selector).element).toBe(firstElement);
+
+    release?.();
+    await pending;
+    await flushPromises();
+    session.dispose?.();
   });
 
   it("delegates report download cards to the Legacy exporter", async () => {

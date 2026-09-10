@@ -94,6 +94,26 @@ describe("createDeepWindowStore", () => {
     expect(windows.getState().windows.find((item) => item.id === sibling)?.status).toBe("cancelled");
   });
 
+  it("按报告阶段推进骨架步骤并保留已完成状态", () => {
+    const windows = store();
+    const id = windows.open(result("Tapo"), {
+      status: "loading",
+      skeletonSteps: [
+        { id: "understand", label: "理解问题", state: "active" },
+        { id: "query", label: "查询数据", state: "pending" },
+        { id: "report", label: "生成报告", state: "pending" }
+      ]
+    });
+
+    expect(windows.updateSkeleton(id, 2)).toBe(true);
+    expect(windows.getState().windows.find((item) => item.id === id)?.skeletonSteps?.map((step) => step.state))
+      .toEqual(["done", "active", "pending"]);
+
+    expect(windows.updateSkeleton(id, 3)).toBe(true);
+    expect(windows.getState().windows.find((item) => item.id === id)?.skeletonSteps?.map((step) => step.state))
+      .toEqual(["done", "done", "active"]);
+  });
+
   it("applies trend metric, category, and column controls instead of treating them as no-ops", () => {
     const windows = store();
     const id = windows.open(result("Trend"));

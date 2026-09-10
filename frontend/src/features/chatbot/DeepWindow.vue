@@ -130,6 +130,14 @@ const steps = computed<readonly DeepWindowSkeletonStep[]>(() => props.skeletonSt
   { id: "query", label: props.language === "zh" ? "查询数据" : "Querying data", state: "pending" },
   { id: "report", label: props.language === "zh" ? "生成报告" : "Generating report", state: "pending" }
 ]);
+const activeStepIndex = computed(() => steps.value.findIndex((step) => step.state === "active"));
+const activeStepNumber = computed(() => activeStepIndex.value >= 0 ? activeStepIndex.value + 1 : steps.value.length);
+const activeStepLabel = computed(() => steps.value[activeStepIndex.value]?.label || (props.language === "zh" ? "报告已完成" : "Report complete"));
+
+function stepStateLabel(state: DeepWindowSkeletonStep["state"]): string {
+  if (props.language === "zh") return state === "done" ? "已完成" : state === "active" ? "进行中" : "等待中";
+  return state === "done" ? "Complete" : state === "active" ? "In progress" : "Queued";
+}
 
 const memoryActionLabel = computed(() => props.addedToMemory
   ? (props.language === "zh" ? "已加入对话" : "Added")
@@ -344,9 +352,26 @@ onBeforeUnmount(() => pointerUp());
 
     <div v-if="!minimized" class="deep-window-body" data-deep-window-content @click="handleChartClick" @change="handleChartChange">
       <section v-if="isLoading" class="deep-window-skeleton" aria-live="polite" data-deep-window-skeleton>
-        <div v-for="step in steps" :key="step.id" class="deep-skeleton-step" :class="step.state" data-deep-window-step>
+        <div class="deep-skeleton-progress" data-deep-window-progress>
+          <div class="deep-skeleton-progress-copy">
+            <span class="deep-skeleton-kicker">{{ language === "zh" ? "报告生成进度" : "Report progress" }}</span>
+            <strong>{{ activeStepLabel }}</strong>
+          </div>
+          <span class="deep-skeleton-progress-count">{{ activeStepNumber }} / {{ steps.length }}</span>
+        </div>
+        <div
+          v-for="step in steps"
+          :key="step.id"
+          class="deep-skeleton-step"
+          :class="step.state"
+          data-deep-window-step
+          :data-step-id="step.id"
+          :data-step-state="step.state"
+          :aria-current="step.state === 'active' ? 'step' : undefined"
+        >
           <span class="deep-skeleton-spinner" aria-hidden="true"></span>
-          <span>{{ step.label }}</span>
+          <span class="deep-skeleton-step-label">{{ step.label }}</span>
+          <span class="deep-skeleton-step-status" data-deep-window-step-status>{{ stepStateLabel(step.state) }}</span>
         </div>
       </section>
 

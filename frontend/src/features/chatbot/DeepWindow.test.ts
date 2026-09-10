@@ -118,6 +118,23 @@ describe("DeepWindow", () => {
     expect(wrapper.find('[data-deep-window-action="stop"]').exists()).toBe(true);
   });
 
+  it("显示报告生成的当前阶段、步骤编号和完成状态", () => {
+    const wrapper = mount(DeepWindow, {
+      props: loadingDeepWindow({
+        skeletonSteps: [
+          { id: "understand", label: "理解问题", state: "done" },
+          { id: "query", label: "查询数据", state: "active" },
+          { id: "report", label: "生成报告", state: "pending" }
+        ]
+      })
+    });
+
+    expect(wrapper.get("[data-deep-window-progress]").text()).toContain("2 / 3");
+    expect(wrapper.get('[data-deep-window-step][data-step-id="understand"]').attributes("data-step-state")).toBe("done");
+    expect(wrapper.get('[data-deep-window-step][data-step-id="query"] [data-deep-window-step-status]').text()).toBe("进行中");
+    expect(wrapper.get('[data-deep-window-step][data-step-id="report"] [data-deep-window-step-status]').text()).toBe("等待中");
+  });
+
   it("keeps the Legacy Deep Window actions when content is ready", async () => {
     const wrapper = mount(DeepWindow, { props: readyDeepWindow() });
 
