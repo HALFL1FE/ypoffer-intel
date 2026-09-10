@@ -81,6 +81,7 @@ const localDeepWindows = createDeepWindowStore({
 });
 const deepWindowController = props.deepWindows || localDeepWindows;
 let chatAbortController: AbortController | null = null;
+let pendingReportDeepWindowId: string | null = null;
 let stopSessionSubscription: (() => void) | null = null;
 const deepWindowsState = ref<DeepWindowViewState>(deepWindowController.getState());
 let stopDeepWindowSubscription: (() => void) | null = null;
@@ -181,7 +182,13 @@ function feedbackForDeepWindow(windowId: string): ReturnType<NonNullable<Chatbot
 }
 
 function sessionResultToView(result: ChatbotSessionResult, query: string): ChatbotReportViewResult {
-  if (result.report) return { ...result.report, sessionResult: result };
+  if (result.report) return {
+    ...result.report,
+    ...(result.document ? { document: result.document } : {}),
+    ...(result.contentHtml ? { contentHtml: result.contentHtml } : {}),
+    ...(result.recommendationHtml ? { recommendationHtml: result.recommendationHtml } : {}),
+    sessionResult: result
+  };
   const status: ChatbotReportViewResult["status"] = result.status === "success"
     ? "resolved" : result.status === "stopped" ? "deferred" : "not_found";
   return {
@@ -206,7 +213,33 @@ function sessionResultToView(result: ChatbotSessionResult, query: string): Chatb
   };
 }
 
-const displayedDeepWindows = computed<readonly DeepWindowState[]>(() => deepWindowsState.value.windows);
+function placeholderReportView(query: string, message: string): ChatbotReportViewResult {
+  return {
+    intent: "analysis",
+    status: "deferred",
+    query,
+    source: "unavailable",
+    rows: [],
+    summary: {
+      offerCount: 0,
+      clicks: 0,
+      orders: 0,
+      revenue: 0,
+      commission: 0,
+      conversionRate: null
+    },
+    message,
+    title: query
+  };
+}
+
+function loadingReportView(query: string): ChatbotReportViewResult {
+  return placeholderReportView(query, props.language === "zh" ? "正在生成分析报告…" : "Generating analysis report…");
+}
+
+const displayedDeepWindows = computed<readonly DeepWindowState[]>(() => (
+  deepWindowsState.value.windows.filter((item) => !item.hidden)
+));
 
 const activeDisplayedDeepWindow = computed<DeepWindowState | null>(() => {
   const activeId = deepWindowsState.value.activeId;
@@ -286,27 +319,48 @@ async function submitReport(): Promise<void> {
     reportLoading.value = true;
     report.hasError.value = false;
     chatAbortController = new AbortController();
+    const deepWindowId = deepWindowController.open(loadingReportView(query), { status: "loading" });
+    pendingReportDeepWindowId = deepWindowId;
     try {
       const result = await props.session.submit(query, { signal: chatAbortController.signal });
-      reportResult.value = sessionResultToView(result, query);
+      const view = sessionResultToView(result, query);
+      reportResult.value = view;
       report.hasError.value = !result.ok;
       feedbackRefreshKey.value += 1;
-      if (result.ok && !props.deepWindows) deepWindowController.close();
+      if (result.status === "stopped" || result.stopped) {
+        deepWindowController.cancel(deepWindowId);
+      } else {
+        deepWindowController.updateResult(deepWindowId, { ...view, title: query }, result.ok ? "ready" : "error");
+      }
+    } catch {
+      report.hasError.value = true;
+      deepWindowController.updateResult(deepWindowId, placeholderReportView(query, copy.value.reportError), "error");
     } finally {
+      if (pendingReportDeepWindowId === deepWindowId) pendingReportDeepWindowId = null;
       chatAbortController = null;
       reportLoading.value = false;
     }
     return;
   }
+  const query = reportPrompt.value.trim();
+  if (!query || reportLoading.value) return;
+  const deepWindowId = deepWindowController.open(loadingReportView(query), { status: "loading" });
   const result = await report.submit();
-  if (result) deepWindowController.close();
+  if (result) deepWindowController.updateResult(deepWindowId, { ...result, title: query }, "ready");
+  else deepWindowController.updateResult(deepWindowId, placeholderReportView(query, copy.value.reportError), "error");
 }
 
 function openDeep(): void {
   if (!reportResult.value) return;
   const existingId = reportResult.value.sessionResult?.deepWindowId;
-  if (existingId && deepWindowsState.value.windows.some((item) => item.id === existingId)) {
-    deepWindowController.activate(existingId);
+  const answerId = reportResult.value.sessionResult?.answerId;
+  const existing = deepWindowsState.value.windows.find((item) => (
+    (existingId && item.id === existingId)
+    || (answerId && item.result.sessionResult?.answerId === answerId)
+    || (!answerId && item.mode === "report" && item.result.query === reportResult.value?.query)
+  ));
+  if (existing) {
+    deepWindowController.activate(existing.id);
     return;
   }
   const sessionId = props.session?.openDeepWindow?.();
@@ -361,20 +415,8 @@ function activeDeepWindowId(): string | null {
   return activeDisplayedDeepWindow.value?.id || null;
 }
 
-function pinDeepWindowById(id: string): void {
-  deepWindowController.pin(id);
-}
-
 function moveDeepWindowById(id: string, x: number, y: number): void {
   deepWindowController.move(id, x, y);
-}
-
-function cloneDeepWindowById(id: string): void {
-  deepWindowController.clone(id);
-}
-
-function toggleDeepWindowOverlayById(id: string): void {
-  deepWindowController.toggleOverlay(id);
 }
 
 function exportDeepWindowById(id: string): void {
@@ -382,6 +424,7 @@ function exportDeepWindowById(id: string): void {
 }
 
 function cancelDeepWindowById(id: string): void {
+  if (pendingReportDeepWindowId === id) chatAbortController?.abort();
   deepWindowController.cancel(id);
 }
 
@@ -731,8 +774,6 @@ onBeforeUnmount(() => {
       :language="language"
       :result="window.result"
       :minimized="window.minimized"
-      :pinned="window.pinned"
-      :overlay="window.overlay"
       :status="window.status"
       :position="window.position"
       :title="window.title"
@@ -749,16 +790,12 @@ onBeforeUnmount(() => {
       :can-close="window.canClose"
       :feedback-state="window.feedbackState"
       :feedback="feedbackForDeepWindow(window.id)"
-      :absolute-position="Boolean(props.deepWindows)"
       @activate="deepWindowController.activate(window.id)"
       @minimize="deepWindowController.minimize(window.id)"
       @restore="deepWindowController.restore(window.id)"
       @close="deepWindowController.close(window.id)"
       @add-memory="addDeepWindowToMemory(window.id)"
-      @pin="pinDeepWindowById(window.id)"
       @move="(x, y) => moveDeepWindowById(window.id, x, y)"
-      @clone="cloneDeepWindowById(window.id)"
-      @overlay="toggleDeepWindowOverlayById(window.id)"
       @export="exportDeepWindowById(window.id)"
       @cancel="cancelDeepWindowById(window.id)"
       @download="downloadRecommendation"

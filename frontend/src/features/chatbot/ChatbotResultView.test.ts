@@ -61,6 +61,26 @@ describe("ChatbotResultView", () => {
     expect(wrapper.emitted("download")).toEqual([["download-1"]]);
   });
 
+  it("renders recommendation downloads together with the report narrative", async () => {
+    const result = buildChatbotReport("Alpha", data, "en");
+    const wrapper = mount(ChatbotResultView, {
+      props: {
+        language: "en",
+        result: {
+          ...result,
+          contentHtml: '<p data-report-narrative>Report narrative</p>',
+          recommendationHtml: '<div class="download-card"><button type="button" data-download-id="memory-recommendation">Download recommendation Excel</button></div>'
+        }
+      }
+    });
+
+    expect(wrapper.find("[data-report-narrative]").exists()).toBe(true);
+    expect(wrapper.find('[data-download-id="memory-recommendation"]').exists()).toBe(true);
+
+    await wrapper.get('[data-download-id="memory-recommendation"]').trigger("click");
+    expect(wrapper.emitted("download")).toEqual([["memory-recommendation"]]);
+  });
+
   it("forwards the owning answerId with a report download", async () => {
     const result = buildChatbotReport("Alpha", data, "en");
     const wrapper = mount(ChatbotResultView, {

@@ -11,6 +11,14 @@ describe("analysisReports", () => {
     expect(result.rows[0]).toHaveProperty("sampleGate");
   });
 
+  it("analysis 命令在没有候选表时仍使用冒号后的商户目标", () => {
+    const query = resolveReportQuery("analysis: Alpha Audio", { language: "en", categories: [] });
+    const result = buildAnalysisReport(query, parityOffers, "en");
+
+    expect(query.analysisTargets).toEqual(["Alpha Audio"]);
+    expect(result.rows.map((row) => row.merchantId)).toEqual(["1001"]);
+  });
+
   it("EPC/CVR 需要 clicks>=100，低样本不生成百分位", () => {
     const rows = [
       ...parityOffers,

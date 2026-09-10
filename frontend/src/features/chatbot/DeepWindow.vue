@@ -3,9 +3,11 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 import type { UiLanguage } from "../../shared/i18n";
 import ChatAnswerActions from "./ChatAnswerActions.vue";
+import DeepWindowContextOverview from "./DeepWindowContextOverview.vue";
 import ChatbotResultView from "./ChatbotResultView.vue";
 import type { ChatbotAnswerFeedbackState, ChatbotFeedback, ChatbotReportViewResult } from "./chatbotViewTypes";
 import type { DeepWindowInteraction, DeepWindowSkeletonStep } from "./deepWindowStore";
+import type { ReportDocument } from "./report/reportContracts";
 
 type DeepWindowStatus = "loading" | "ready" | "content" | "cancelled" | "error";
 
@@ -82,13 +84,47 @@ const dragging = ref(false);
 const dropTarget = ref(false);
 const panelRoot = ref<HTMLElement | null>(null);
 let dragOrigin: { x: number; y: number; left: number; top: number } | null = null;
+let dragMoved = false;
 
 const status = computed(() => props.status === "ready" ? "content" : props.status);
 const isLoading = computed(() => status.value === "loading");
 const isContent = computed(() => status.value === "content");
 const windowTitle = computed(() => props.title || props.result.title || props.result.category || props.result.tier || props.result.intent || "Deep Analysis");
 const windowSummary = computed(() => props.summary || props.result.message || "");
-const reportHtml = computed(() => props.contentHtml?.trim() || props.result.contentHtml?.trim() || "");
+const structuredDocument = computed<ReportDocument | null>(() => {
+  if (props.result.document) return props.result.document;
+  return "documentId" in props.result ? props.result as unknown as ReportDocument : null;
+});
+const displayResult = computed<ChatbotReportViewResult>(() => ({
+  ...props.result,
+  ...(props.contentHtml?.trim() ? { contentHtml: props.contentHtml } : {}),
+  ...(structuredDocument.value?.contentHtml?.trim() && !props.result.contentHtml?.trim()
+    ? { contentHtml: structuredDocument.value.contentHtml }
+    : {}),
+  ...(structuredDocument.value?.recommendationHtml?.trim() && !props.result.recommendationHtml?.trim()
+    ? { recommendationHtml: structuredDocument.value.recommendationHtml }
+    : {})
+}));
+const reportHtml = computed(() => displayResult.value.contentHtml?.trim() || "");
+const recommendationHtml = computed(() => displayResult.value.recommendationHtml?.trim() || "");
+const hasStructuredDocument = computed(() => Boolean(structuredDocument.value));
+const hasTrendBlock = computed(() => Boolean(
+  structuredDocument.value?.blocks.some((block) => block.kind === "trend")
+));
+const hasMerchantOverview = computed(() => Boolean(
+  structuredDocument.value
+  && structuredDocument.value.rows.length
+  && (structuredDocument.value.intent === "merchant" || structuredDocument.value.intent === "asin")
+));
+const hasCategoryOverview = computed(() => Boolean(
+  structuredDocument.value
+  && structuredDocument.value.rows.length
+  && structuredDocument.value.intent === "category"
+));
+const showLegacySummary = computed(() => !hasStructuredDocument.value && !reportHtml.value && !recommendationHtml.value);
+const contextHeading = computed(() => hasTrendBlock.value
+  ? (props.language === "zh" ? "趋势图表" : "Trend chart")
+  : (props.language === "zh" ? "概览" : "Overview"));
 const steps = computed<readonly DeepWindowSkeletonStep[]>(() => props.skeletonSteps?.length ? props.skeletonSteps : [
   { id: "understand", label: props.language === "zh" ? "理解问题" : "Understanding your question", state: "active" },
   { id: "query", label: props.language === "zh" ? "查询数据" : "Querying data", state: "pending" },
@@ -98,18 +134,16 @@ const steps = computed<readonly DeepWindowSkeletonStep[]>(() => props.skeletonSt
 const memoryActionLabel = computed(() => props.addedToMemory
   ? (props.language === "zh" ? "已加入对话" : "Added")
   : (props.language === "zh" ? "加入对话" : "Add to chat"));
+const exportLabel = computed(() => props.language === "zh" ? "导出" : "Export");
 const stopLabel = computed(() => props.language === "zh" ? "停止" : "Stop");
 const closeLabel = computed(() => props.language === "zh" ? "关闭" : "Close");
 const restoreLabel = computed(() => props.language === "zh" ? "恢复" : "Restore");
-const pinLabel = computed(() => props.pinned ? (props.language === "zh" ? "取消置顶" : "Unpin") : (props.language === "zh" ? "置顶" : "Pin"));
-const cloneLabel = computed(() => props.language === "zh" ? "复制" : "Clone");
-const overlayLabel = computed(() => props.overlay ? (props.language === "zh" ? "退出浮层" : "Exit overlay") : (props.language === "zh" ? "浮层" : "Overlay"));
 const errorText = computed(() => props.errorMessage || (status.value === "cancelled"
   ? (props.language === "zh" ? "分析已停止。" : "The analysis was stopped.")
   : (props.language === "zh" ? "分析失败，请稍后重试。" : "The analysis failed. Please try again.")));
 
 const DEFAULT_TREND_COLUMNS = new Set([
-  "revenue", "orders", "epc", "aov", "clicks", "affiliatePayout", "dpv", "atc", "conversionRate"
+  "salesAmount", "revenue", "orders", "epc", "aov", "clicks", "affiliatePayout", "dpv", "atc", "conversionRate"
 ]);
 
 function chartBody(target: HTMLElement): HTMLElement | null {
@@ -128,9 +162,9 @@ function syncTrendColumnChecks(root: HTMLElement, all: boolean): void {
 }
 
 const windowStyle = computed(() => ({
-  ...(props.absolutePosition
-    ? { left: `${props.position.x}px`, top: `${props.position.y}px`, right: "auto", transform: "none" }
-    : { transform: `translate3d(${props.position.x}px, ${props.position.y}px, 0)` }),
+  left: `${props.position.x}px`,
+  top: `${props.position.y}px`,
+  right: "auto",
   zIndex: String(props.zIndex)
 }));
 
@@ -166,6 +200,7 @@ function memoryDropTarget(event?: Event): Element | null {
 
 function pointerMove(event: PointerEvent): void {
   if (!dragOrigin) return;
+  if (Math.abs(event.clientX - dragOrigin.x) > 3 || Math.abs(event.clientY - dragOrigin.y) > 3) dragMoved = true;
   const nextLeft = dragOrigin.left + event.clientX - dragOrigin.x;
   const nextTop = dragOrigin.top + event.clientY - dragOrigin.y;
   const panelWidth = panelRoot.value?.getBoundingClientRect().width || 0;
@@ -180,9 +215,10 @@ function pointerUp(event?: Event): void {
   const wasDragging = Boolean(dragOrigin);
   const wasMinimized = props.minimized;
   const droppedOnMemoryBar = wasDragging && Boolean(memoryDropTarget(event));
-  const moved = wasDragging && dragging.value;
+  const moved = wasDragging && dragMoved;
   dragging.value = false;
   dragOrigin = null;
+  dragMoved = false;
   window.removeEventListener("pointermove", pointerMove);
   window.removeEventListener("pointerup", pointerUp);
   setDropTarget(false);
@@ -196,6 +232,7 @@ function startDrag(event: PointerEvent): void {
   if (target?.closest("button, input, select, textarea, .deep-window-actions")) return;
   emit("activate");
   dragging.value = true;
+  dragMoved = false;
   dragOrigin = { x: event.clientX, y: event.clientY, left: props.position.x, top: props.position.y };
   window.addEventListener("pointermove", pointerMove);
   window.addEventListener("pointerup", pointerUp);
@@ -264,6 +301,11 @@ function handleChartChange(event: Event): void {
   }
 }
 
+function forwardDownload(downloadId: string, answerId?: string): void {
+  if (answerId) emit("download", downloadId, answerId);
+  else emit("download", downloadId);
+}
+
 watch(() => props.minimized, (minimized) => {
   if (!minimized) setDropTarget(false);
 });
@@ -276,7 +318,7 @@ onBeforeUnmount(() => pointerUp());
   <aside
     ref="panelRoot"
     class="deep-window"
-    :class="{ minimized, 'source-chat': mode === 'chat', 'source-report': mode === 'report', 'is-minimized': minimized, 'is-pinned': pinned, 'is-overlay': overlay, dragging, 'is-dragging': dragging, 'drop-target': dropTarget, generating: isLoading }"
+    :class="{ minimized, 'source-chat': mode === 'chat', 'source-report': mode === 'report', 'is-minimized': minimized, dragging, 'is-dragging': dragging, 'drop-target': dropTarget, generating: isLoading }"
     :style="windowStyle"
     data-deep-window
     :data-deep-window-id="id"
@@ -286,18 +328,13 @@ onBeforeUnmount(() => pointerUp());
   >
     <header class="deep-window-header" data-deep-window-header data-draggable="true" @pointerdown="startDrag">
       <div class="deep-window-heading">
-        <span class="deep-window-eyebrow">DEEP WINDOW</span>
         <h2 class="deep-window-title">{{ windowTitle }}</h2>
-        <span v-if="minimized" class="deep-window-pill-state">{{ isLoading ? stopLabel : windowSummary }}</span>
       </div>
       <div class="deep-window-actions">
         <button v-if="minimized" class="deep-window-minimize" type="button" :aria-label="restoreLabel" data-deep-window-action="restore" @click="emit('restore')">▢</button>
         <template v-else-if="!isLoading">
+          <button v-if="isContent && canExport" type="button" data-deep-window-action="export" @click="emit('export')">{{ exportLabel }}</button>
           <button v-if="isContent" class="deep-window-chat-add" type="button" data-deep-window-action="add-memory" :disabled="!canAddMemory || addedToMemory" @click="emit('add-memory')">{{ memoryActionLabel }}</button>
-          <button v-if="isContent && canExport" type="button" data-deep-window-action="export" @click="emit('export')">⇩</button>
-          <button v-if="isContent" type="button" data-deep-window-action="pin" :aria-label="pinLabel" :aria-pressed="pinned" @click="emit('pin')">{{ pinned ? "★" : "☆" }}</button>
-          <button v-if="isContent" type="button" data-deep-window-action="clone" :aria-label="cloneLabel" @click="emit('clone')">＋</button>
-          <button v-if="isContent" type="button" data-deep-window-action="overlay" :aria-label="overlayLabel" :aria-pressed="overlay" @click="emit('overlay')">▣</button>
         </template>
         <button v-if="isLoading && canCancel" class="deep-window-stop" type="button" data-deep-window-action="stop" @click="emit('cancel')">{{ stopLabel }}</button>
         <button v-if="!minimized && canMinimize && !isLoading" class="deep-window-minimize" type="button" data-deep-window-action="minimize" aria-label="Minimize" @click="emit('minimize')">—</button>
@@ -315,15 +352,45 @@ onBeforeUnmount(() => pointerUp());
 
       <section v-else-if="isContent" class="deep-window-content" data-deep-window-report>
         <h2 class="deep-report-title">{{ windowTitle }}</h2>
-        <p v-if="windowSummary" class="deep-report-summary">{{ windowSummary }}</p>
-        <div v-if="reportHtml && !result.document" class="deep-report-sections" data-deep-window-sections v-html="reportHtml"></div>
-        <div v-else class="deep-report-sections" data-deep-window-sections>
-          <ChatbotResultView
-            :language="language"
-            :result="result"
-            @download="(downloadId, answerId) => emit('download', downloadId, answerId)"
-            @context-interact="(action, value) => emit('context-interact', action, value)"
-          />
+        <p v-if="windowSummary && showLegacySummary" class="deep-report-summary">{{ windowSummary }}</p>
+        <div class="deep-report-sections" data-deep-window-sections>
+          <div class="deep-quick-result" data-deep-quick-result>
+            <div v-if="hasStructuredDocument && hasTrendBlock" class="deep-context-chart" data-deep-context-chart>
+              <h3 class="deep-chart-heading">{{ contextHeading }}</h3>
+              <ChatbotResultView
+                :language="language"
+                :result="displayResult"
+                compact
+                @download="forwardDownload"
+                @context-interact="(action, value) => emit('context-interact', action, value)"
+              />
+            </div>
+            <div v-else-if="hasStructuredDocument" class="deep-context-overview" data-deep-context-overview>
+              <h3 class="deep-overview-heading">{{ contextHeading }}</h3>
+              <DeepWindowContextOverview
+                v-if="hasMerchantOverview || hasCategoryOverview"
+                :language="language"
+                :document="structuredDocument!"
+              />
+              <ChatbotResultView
+                v-if="(!hasMerchantOverview && !hasCategoryOverview) || reportHtml || recommendationHtml"
+                :language="language"
+                :result="displayResult"
+                compact
+                :render-structured="!hasMerchantOverview"
+                @download="forwardDownload"
+                @context-interact="(action, value) => emit('context-interact', action, value)"
+              />
+            </div>
+            <ChatbotResultView
+              v-else
+              :language="language"
+              :result="displayResult"
+              compact
+              @download="forwardDownload"
+              @context-interact="(action, value) => emit('context-interact', action, value)"
+            />
+          </div>
         </div>
         <div class="deep-window-feedback" data-deep-window-feedback>
           <ChatAnswerActions

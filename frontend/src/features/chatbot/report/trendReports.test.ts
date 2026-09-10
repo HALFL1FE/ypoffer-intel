@@ -19,6 +19,33 @@ describe("trendReports", () => {
     expect(result.rows.at(-1)).toMatchObject({ month: "2026-08", value: 1800, delta: 600 });
   });
 
+  it("trend 命令在没有候选表时仍按冒号后的商户目标筛选", () => {
+    const rows = [
+      {
+        ...parityOffers[0],
+        monthly: [
+          { month: "2026-06", clicks: 100, orders: 5, salesAmount: 500 },
+          { month: "2026-07", clicks: 200, orders: 12, salesAmount: 1200 },
+          { month: "2026-08", clicks: 300, orders: 18, salesAmount: 1800 }
+        ]
+      },
+      {
+        ...parityOffers[2],
+        monthly: [
+          { month: "2026-06", clicks: 50, orders: 2, salesAmount: 200 },
+          { month: "2026-07", clicks: 60, orders: 3, salesAmount: 300 },
+          { month: "2026-08", clicks: 70, orders: 4, salesAmount: 400 }
+        ]
+      }
+    ];
+    const query = resolveReportQuery("trend: Alpha Audio", { language: "en", categories: [] });
+    const result = buildTrendReport(query, rows, "en", new Date("2026-09-08T00:00:00Z"));
+
+    expect(query).toMatchObject({ intent: "analysis", analysisType: "trend", analysisTargets: ["Alpha Audio"] });
+    expect(result.rows).toHaveLength(3);
+    expect(result.rows.at(-1)).toMatchObject({ month: "2026-08", value: 1800 });
+  });
+
   it("没有月度数据时标记 estimated，且品类趋势排除 Tier 4/BLACK TIER", () => {
     const query = resolveReportQuery("Electronics 趋势", { language: "en", categories: ["Electronics"] });
     const result = buildTrendReport(query, parityOffers, "en");

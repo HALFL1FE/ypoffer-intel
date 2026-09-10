@@ -13,6 +13,18 @@ describe("paymentReports", () => {
     expect(unpaid.rows[0]).toMatchObject({ paymentStatus: "Unpaid", paymentCycle: 30, remainingAmount: 250 });
   });
 
+  it("payment 命令把商户目标与付款状态一起解析", () => {
+    const query = resolveReportQuery("payment: Alpha Audio 未付款", {
+      language: "en",
+      categories: [],
+      merchantCandidates: [{ id: "1001", name: "Alpha Audio" }]
+    });
+    const result = buildPaymentReport(query, parityPaymentRecords, parityOffers, "en", new Date("2026-09-08T00:00:00Z"));
+
+    expect(query).toMatchObject({ intent: "payment", paymentStatus: "Unpaid", merchantIds: ["1001"] });
+    expect(result.rows.map((row) => row.merchantId)).toEqual(["1001"]);
+  });
+
   it("支持付款周期比较且 Unknown 不会被默认为 Unpaid", () => {
     const records = [...parityPaymentRecords, { merchantId: "1003", merchantName: "Gamma Audio", paymentStatus: "Unknown", paymentCycle: 90, revenueMade: 10, commissionMade: 1 }];
     const query = resolveReportQuery("payment cycle >= 60", { language: "en", categories: [] });

@@ -218,7 +218,7 @@ function handleReminderInteraction(event: MouseEvent): void {
           </aside>
           <article v-for="message in messages" :key="message.id" class="message" :class="message.role" :data-chatbot-answer-id="message.role === 'assistant' ? (message.answerId || message.id) : undefined">
             <div v-if="message.role === 'assistant'" class="chat-stream-text" v-html="messageHtml(message)"></div>
-            <div v-else class="chat-stream-text"><p>{{ message.content }}</p></div>
+            <div v-else class="chat-stream-text chatbot-user-message"><p>{{ message.content }}</p></div>
             <span v-if="message.streaming" class="chatbot-chat-cursor" aria-hidden="true"></span>
             <ChatAnswerActions
               v-if="message.role === 'assistant' && !message.streaming && (message.canOpenDeep || message.feedbackState === 'available' || message.feedbackState === 'submitted')"

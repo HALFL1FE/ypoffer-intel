@@ -178,7 +178,8 @@ describe("ChatbotPage", () => {
     expect(wrapper.find('[data-chatbot-result-source]').text()).toContain("DB");
     expect(wrapper.find('[data-chatbot-report-summary]').exists()).toBe(true);
     expect(wrapper.find('[data-chatbot-report-summary]').text()).toContain("show payment status");
-    expect(wrapper.find('[data-legacy-report]').exists()).toBe(false);
+    expect(wrapper.find('[data-chatbot-report-log] [data-legacy-report]').exists()).toBe(false);
+    expect(wrapper.find('[data-deep-window] [data-legacy-report]').exists()).toBe(true);
     expect(wrapper.find('[data-chatbot-context-html] [data-legacy-context]').exists()).toBe(true);
     expect(wrapper.find('[data-chatbot-report-log]').text()).not.toContain("付款状态已从实时数据返回");
 
@@ -195,6 +196,109 @@ describe("ChatbotPage", () => {
 
     await wrapper.get('[data-chatbot-action="download-overview"]').trigger("click");
     expect(downloadOverview).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a loading Deep Window for a Report submission and resolves it in place", async () => {
+    let state: ChatbotViewState = {
+      mode: "report",
+      language: "en",
+      hasMemory: false,
+      source: "cache",
+      status: "idle",
+      history: [],
+      messages: [],
+      memory: [],
+      currentResult: null
+    };
+    let resolveSubmit: ((result: ChatbotSessionResult) => void) | undefined;
+    const result: ChatbotSessionResult = {
+      ok: true,
+      status: "success",
+      mode: "report",
+      source: "db",
+      intent: "merchant",
+      response: "Shokz report ready",
+      contentHtml: "<p data-deep-auto-result>Shokz report ready</p>",
+      answerId: "deep-auto-answer"
+    };
+    const session = {
+      getState: () => state,
+      setMode: vi.fn(),
+      submit: vi.fn(() => new Promise<ChatbotSessionResult>((resolve) => {
+        resolveSubmit = resolve;
+      })),
+      addMemory: vi.fn(),
+      removeMemory: vi.fn(),
+      clearConversation: vi.fn(),
+      onChange: vi.fn(() => () => undefined)
+    };
+    const wrapper = mount(ChatbotPage, { props: { language: "en", offers, session, autoFocus: false } });
+
+    await wrapper.get('[data-chatbot-report-input]').setValue("merchant: shokz");
+    void wrapper.get('[data-chatbot-report-form]').trigger("submit");
+    await nextTick();
+
+    expect(wrapper.find('[data-deep-window]').exists()).toBe(true);
+    expect(wrapper.get('[data-deep-window]').attributes("data-status")).toBe("loading");
+    expect(wrapper.find('[data-deep-window-action="stop"]').exists()).toBe(true);
+
+    state = { ...state, status: "success", currentResult: result };
+    resolveSubmit?.(result);
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.findAll('[data-deep-window]')).toHaveLength(1);
+    expect(wrapper.get('[data-deep-window]').attributes("data-status")).toBe("content");
+    expect(wrapper.get('[data-deep-window-content]').text()).toContain("Shokz report ready");
+    wrapper.unmount();
+  });
+
+  it("stops the underlying Report request when the loading Deep Window is stopped", async () => {
+    let requestSignal: AbortSignal | undefined;
+    let resolveSubmit: ((result: ChatbotSessionResult) => void) | undefined;
+    const state: ChatbotViewState = {
+      mode: "report",
+      language: "en",
+      hasMemory: false,
+      source: "cache",
+      status: "idle",
+      history: [],
+      messages: [],
+      memory: [],
+      currentResult: null
+    };
+    const session = {
+      getState: () => state,
+      setMode: vi.fn(),
+      submit: vi.fn((_prompt: string, callbacks: ChatbotRunCallbacks) => {
+        requestSignal = callbacks.signal;
+        return new Promise<ChatbotSessionResult>((resolve) => {
+          resolveSubmit = resolve;
+        });
+      }),
+      removeMemory: vi.fn(),
+      clearConversation: vi.fn(),
+      onChange: vi.fn(() => () => undefined)
+    };
+    const wrapper = mount(ChatbotPage, { props: { language: "en", offers, session, autoFocus: false } });
+
+    await wrapper.get('[data-chatbot-report-input]').setValue("merchant: shokz");
+    void wrapper.get('[data-chatbot-report-form]').trigger("submit");
+    await nextTick();
+    await wrapper.get('[data-deep-window-action="stop"]').trigger("click");
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(wrapper.find('[data-deep-window]').exists()).toBe(false);
+    resolveSubmit?.({
+      ok: false,
+      status: "stopped",
+      mode: "report",
+      source: "unavailable",
+      response: "",
+      errorCode: "stopped_by_user"
+    });
+    await flushPromises();
+    wrapper.unmount();
   });
 
   it("keeps feedback, logs, help, guide, onboarding, and clear actions on the shared session", async () => {

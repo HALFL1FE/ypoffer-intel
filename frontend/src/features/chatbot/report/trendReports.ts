@@ -1,6 +1,7 @@
 import type { UiLanguage } from "../../../shared/i18n";
 import type { ReportQuery, ReportRow, TrendMetric } from "./reportContracts";
 import { matchesCategory, metricValue, normalizeOfferRow, rowCategories, rowMerchantId, rowMerchantName, rowTier, text } from "./entityReports";
+import { normalizeChatbotText } from "../chatbotModel";
 
 export interface TrendRow extends ReportRow {
   readonly month: string;
@@ -139,6 +140,12 @@ const FULL_TREND_METRICS: readonly TrendMetric[] = [
   "salesAmount", "orders", "epc", "aov", "clicks", "affiliatePayout", "dpv", "atc", "conversionRate", "payout", "directSales", "haloSales"
 ];
 
+// 旧版 Deep Window 默认展示的核心指标列；保留月份和环比列，
+// 让现代报告首次打开时与旧版趋势上下文保持同一数据密度。
+const LEGACY_DEFAULT_VISIBLE_COLUMNS = [
+  "month", "salesAmount", "orders", "epc", "aov", "clicks", "affiliatePayout", "dpv", "atc", "conversionRate", "deltaPct"
+] as const;
+
 function metricAvailability(row: Readonly<Record<string, unknown>>, metric: TrendMetric): boolean {
   if (metric === "salesAmount" || metric === "revenue") return ["salesAmount", "revenue", "sales"].some((key) => row[key] !== undefined && row[key] !== null);
   if (metric === "affiliatePayout" || metric === "affCommission") return ["affiliatePayout", "affCommission", "commission"].some((key) => row[key] !== undefined && row[key] !== null);
@@ -192,6 +199,15 @@ export function mergeMerchantMonths(payload: unknown): readonly ReportRow[] {
 
 function selectedRows(query: ReportQuery, offers: readonly ReportRow[]): readonly ReportRow[] {
   const pairs = offers.map((raw) => ({ raw, row: normalizeOfferRow(raw) }));
+  if (query.analysisTargets.length && !query.merchantIds.length && !query.merchantNames.length && !query.tiers.length && !query.categories.length) {
+    const targets = query.analysisTargets.map(normalizeChatbotText).filter(Boolean);
+    const targeted = pairs.filter(({ row }) => {
+      const source = row as Readonly<Record<string, unknown>>;
+      const values = [rowMerchantId(source), rowMerchantName(source), ...rowCategories(source)].map(normalizeChatbotText).filter(Boolean);
+      return targets.some((target) => values.some((value) => value === target || value.includes(target) || target.includes(value)));
+    });
+    if (targeted.length) return targeted.map(({ raw }) => raw);
+  }
   const filtered = pairs.filter(({ row }) => {
     const source = row as Readonly<Record<string, unknown>>;
     if (query.merchantIds.length && !query.merchantIds.includes(rowMerchantId(source))) return false;
@@ -307,7 +323,7 @@ export function buildTrendReport(query: ReportQuery, offers: readonly ReportRow[
     estimated,
     categoryOptions: categories,
     activeCategory: query.categories[0] || null,
-    visibleColumns: ["month", "value", "delta", "deltaPct"],
+    visibleColumns: LEGACY_DEFAULT_VISIBLE_COLUMNS,
     status: trendRows.length >= 2 ? "resolved" : "not_found",
     title: language === "zh" ? "月度趋势" : "Monthly trend",
     note
