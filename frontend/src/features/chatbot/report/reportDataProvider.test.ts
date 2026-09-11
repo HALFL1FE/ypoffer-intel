@@ -79,6 +79,23 @@ describe("createReportDataProvider", () => {
     expect(loadPublisherPortfolio).toHaveBeenCalledTimes(1);
   });
 
+  it("按规范化后的 ASIN 集合去重详情请求，并记录数据库来源", async () => {
+    const loadAsin = vi.fn(async (asins: readonly string[], months: number) => ({
+      rows: [{ asin: asins[0], months }]
+    }));
+    const provider = createReportDataProvider({ offers: parityOffers, loadAsin });
+
+    const [first, second] = await Promise.all([
+      provider.asin!(["b000000001", "B000000001"], 6, signal()),
+      provider.asin!(["B000000001"], 6, signal())
+    ]);
+
+    expect(first).toEqual(second);
+    expect(loadAsin).toHaveBeenCalledTimes(1);
+    expect(loadAsin).toHaveBeenCalledWith(["B000000001"], 6, expect.any(AbortSignal));
+    expect(provider.snapshot()).toMatchObject({ source: "db", detailLoadedFrom: "db" });
+  });
+
   it("取消一个调用方时只结束该窗口，其他窗口仍可复用远程请求", async () => {
     const controller = new AbortController();
     const survivor = new AbortController();

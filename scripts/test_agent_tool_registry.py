@@ -17,7 +17,7 @@ from agent_tool_registry import (
 )
 
 
-def test_registry_has_exactly_seven_tools():
+def test_registry_has_exactly_eight_tools():
     assert AGENT_TOOL_NAMES == (
         "merchant_analysis",
         "category_analysis",
@@ -26,6 +26,7 @@ def test_registry_has_exactly_seven_tools():
         "category_comparison",
         "payment_status",
         "trend",
+        "asin_analysis",
     )
     assert set(AGENT_RESULT_FIELDS) == set(AGENT_TOOL_NAMES)
 
@@ -100,6 +101,23 @@ def test_tool_arguments_are_closed_and_bounded():
     )
     assert invalid is None and error["errorCode"] == "invalid_arguments"
 
+    valid, error = validate_tool_arguments(
+        "asin_analysis", {"asins": [" b0d2hkcmbp ", "B000000001", "B000000001"]}
+    )
+    assert error is None
+    assert valid == {"asins": ["B0D2HKCMBP", "B000000001"]}
+
+    invalid, error = validate_tool_arguments(
+        "asin_analysis", {"asins": ["not-an-asin"]}
+    )
+    assert invalid is None and error["errorCode"] == "invalid_arguments"
+
+    invalid, error = validate_tool_arguments(
+        "asin_analysis",
+        {"asins": ["B000000001", "B000000002", "B000000003", "B000000004", "B000000005", "B000000006"]},
+    )
+    assert invalid is None and error["errorCode"] == "invalid_arguments"
+
 
 def test_payment_status_requires_a_filter():
     invalid, error = validate_tool_arguments("payment_status", {})
@@ -143,6 +161,25 @@ def test_tool_results_allow_only_registered_fields_and_safe_source():
     )
     assert invalid is None
     assert error["errorCode"] == "invalid_tool_result"
+
+    valid, error = validate_tool_result(
+        "asin_analysis",
+        {
+            "ok": True,
+            "data": {
+                "asins": ["B0D2HKCMBP"],
+                "rows": [{"asin": "B0D2HKCMBP", "orders": 12}],
+                "monthly": [{"asin": "B0D2HKCMBP", "month": "2026-08", "orders": 4}],
+                "notFound": [],
+                "headline": "ASIN 查询完成",
+                "note": "来自数据库月度数据",
+                "source": "database",
+                "dataAsOf": "2026-09-11T08:00:00Z",
+            },
+        },
+    )
+    assert error is None
+    assert valid["data"]["asins"] == ["B0D2HKCMBP"]
 
     invalid, error = validate_tool_result(
         "merchant_analysis",

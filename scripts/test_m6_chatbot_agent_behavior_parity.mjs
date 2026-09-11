@@ -12,6 +12,7 @@ const deepWindowStore = read("frontend", "src", "features", "chatbot", "deepWind
 const agentSession = read("frontend", "src", "features", "agent", "agentSession.ts");
 const agentPage = read("frontend", "src", "features", "agent", "AgentPage.vue");
 const agentHost = read("frontend", "src", "features", "agent", "CopilotKitAgentHost.vue");
+const agentWorkspace = read("frontend", "src", "features", "agent", "agentWorkspace.css");
 
 assert(/createChatbotSession/.test(entry) && /createAgentSession/.test(entry), "Modern factory 必须创建独立 Chatbot/Agent session");
 assert(!/OI_LEGACY_BRIDGE|legacy\/bridge/.test(entry + chatbotSession + agentSession + agentHost), "Modern Chatbot/Agent 不得读取旧 bridge");
@@ -26,5 +27,6 @@ assert(/onTimeline/.test(agentPage + agentSession), "Agent 必须保留 timeline
 assert(/memoryText/.test(agentSession), "Agent Runtime 必须继续携带结构化 Memory");
 assert(/trend-interact|setTrendColumns/.test(deepWindow + deepWindowStore), "Deep Window 必须保留趋势控件");
 assert(/renderMarkdownToHtml/.test(agentPage), "Agent 必须使用受控 Markdown renderer");
+assert(/\.agent-workspace \.aw-message\.aw-message-user \.chat-stream-text\s*\{[^}]*color:\s*#fff;[^}]*background:\s*linear-gradient/i.test(agentWorkspace), "Agent 用户提问气泡必须保持蓝底白字，并覆盖通用消息文字样式");
 assert(/dashboard:\s*chatbotFactory/.test(entry) && /agent:\s*agentFactory/.test(entry), "Chatbot/Agent factory 必须注册");
 console.log("PASS: M6 behavior remains in the modern runtime");

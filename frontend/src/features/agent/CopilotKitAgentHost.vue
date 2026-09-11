@@ -43,7 +43,8 @@ const toolNames = [
   "tier_analysis",
   "category_comparison",
   "payment_status",
-  "trend"
+  "trend",
+  "asin_analysis"
 ] as const;
 
 let toolSession: AgentToolRunSession | undefined;

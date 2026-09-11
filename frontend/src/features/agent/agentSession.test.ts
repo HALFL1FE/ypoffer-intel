@@ -85,7 +85,7 @@ describe("createAgentSession", () => {
       contractVersion: "v2",
       question: "EPC 是什么",
       language: "zh",
-      enabledTools: expect.arrayContaining(["merchant_analysis", "trend"])
+      enabledTools: expect.arrayContaining(["merchant_analysis", "trend", "asin_analysis"])
     });
     expect(calls[0]!.body.messages).toBeUndefined();
     expect(calls[0]!.body.tools).toBeUndefined();
@@ -224,6 +224,112 @@ describe("createAgentSession", () => {
       id: "tool-merchant-1",
       toolName: "merchant_analysis",
       status: "done"
+    });
+  });
+
+  it("executes ASIN analysis through the browser-safe DB endpoint and renders monthly rows", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      expect(url).toContain("/api/ui/db/asin?");
+      expect(url).toContain("asins=B0D2HKCMBP");
+      return response({
+        ok: true,
+        checkedAt: "2026-09-11T08:00:00Z",
+        available: true,
+        unmatched: [],
+        rows: [{
+          asin: "B0D2HKCMBP",
+          merchantId: "362653",
+          merchantName: "Shokz Official",
+          productName: "OpenRun Pro",
+          category: "Electronics",
+          clicks: 100,
+          orders: 8,
+          salesAmount: 800,
+          affCommission: 80,
+          monthly: [{
+            asin: "B0D2HKCMBP",
+            merchantName: "Shokz Official",
+            month: "2026-08",
+            clicks: 100,
+            orders: 8,
+            salesAmount: 800,
+            affCommission: 80
+          }]
+        }]
+      });
+    });
+    const session = createAgentSession({
+      offers,
+      language: "zh",
+      fetcher,
+      enableQuestionLogging: false,
+      enableTrace: false
+    });
+
+    const result = await session.executeTool({
+      callId: "tool-asin-1",
+      toolName: "asin_analysis",
+      arguments: { asins: ["b0d2hkcmbp"] },
+      prompt: "查询 ASIN B0D2HKCMBP 的产品信息和月度表现",
+      signal: new AbortController().signal
+    });
+
+    expect(result.toolResult).toMatchObject({
+      callId: "tool-asin-1",
+      toolName: "asin_analysis",
+      result: { ok: true, source: { dataSource: "database", dataAsOf: "2026-09-11T08:00:00Z" } }
+    });
+    const data = (result.toolResult.result as Record<string, unknown>).data as Record<string, unknown>;
+    expect(data.asins).toEqual(["B0D2HKCMBP"]);
+    expect(data.rows).toMatchObject([{ asin: "B0D2HKCMBP", merchantName: "Shokz Official" }]);
+    expect(data.monthly).toMatchObject([{ asin: "B0D2HKCMBP", month: "2026-08", orders: 8 }]);
+    expect(result.resultView).toMatchObject({
+      id: "tool-asin-1",
+      toolName: "asin_analysis",
+      status: "done",
+      kind: "table"
+    });
+    expect(result.resultView?.rows[0]?.label).toContain("B0D2HKCMBP");
+  });
+
+  it("formats tier aggregate metrics without exposing floating point noise", async () => {
+    const decimalOffers = [{
+      merchantId: "369290",
+      merchantName: "Decimal Fixture",
+      brand: "Decimal Fixture",
+      tier: "Tier 2",
+      category: "Kitchen & Dining",
+      clicks: 44869,
+      orders: 936,
+      salesAmount: 87290.46,
+      affCommission: 9931.64
+    }];
+    const session = createAgentSession({
+      offers: decimalOffers,
+      language: "zh",
+      enableQuestionLogging: false,
+      enableTrace: false
+    });
+
+    const result = await session.executeTool({
+      callId: "tool-tier-decimal-format",
+      toolName: "tier_analysis",
+      arguments: { tier: "Tier 2" },
+      prompt: "查询 Tier 2 商户",
+      signal: new AbortController().signal
+    });
+
+    const metrics = Object.fromEntries((result.resultView?.metrics || []).map((metric) => [metric.label, metric.value]));
+    expect(metrics).toMatchObject({
+      merchantCount: "1",
+      clicks: "44,869",
+      orders: "936",
+      revenue: "87,290.46",
+      commission: "9,931.64",
+      epc: "1.945",
+      aov: "93.26",
+      conversionRate: "2.09%"
     });
   });
 });

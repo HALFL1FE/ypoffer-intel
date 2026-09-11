@@ -22,6 +22,7 @@ AGENT_TOOL_NAMES = (
     "category_comparison",
     "payment_status",
     "trend",
+    "asin_analysis",
 )
 AGENT_TIER_NAMES = ("Tier 1", "Tier 2", "Tier 3", "Tier 4", "BLACK TIER")
 AGENT_PAYMENT_STATUSES = ("paid", "pending", "unpaid", "overdue", "partial")
@@ -70,9 +71,14 @@ AGENT_RESULT_FIELDS = {
         "entityType", "target", "estimated", "metric", "metrics", "months",
         "summary", "headline", "note",
     ),
+    "asin_analysis": (
+        "asins", "rows", "monthly", "notFound", "headline", "note",
+        "source", "dataAsOf",
+    ),
 }
 
 _UNSAFE_KEYS = {"__proto__", "constructor", "prototype"}
+_ASIN_PATTERN = re.compile(r"^B[0-9A-Z]{9}$", re.IGNORECASE)
 _RESULT_ERROR_CODES = {
     "tool_error",
     "tool_timeout",
@@ -135,6 +141,20 @@ def _string_array(
             return None, item_error
         cleaned.append(item_value)
     return cleaned, None
+
+
+def _asin_array(value: Any, field: str) -> tuple[list[str] | None, dict | None]:
+    cleaned, error = _string_array(value, field, 1, 5, 10)
+    if error:
+        return None, error
+    normalized: list[str] = []
+    for item in cleaned or []:
+        asin = item.upper()
+        if not _ASIN_PATTERN.fullmatch(asin):
+            return None, _error("invalid_arguments", field)
+        if asin not in normalized:
+            normalized.append(asin)
+    return normalized, None
 
 
 def _text_property(description_zh: str, description_en: str, maximum: int) -> dict[str, Any]:
@@ -254,6 +274,28 @@ def _build_specs() -> dict[str, dict[str, Any]]:
             },
             "argument_fields": ("entityType", "target", "months", "metric"),
         },
+        "asin_analysis": {
+            "description_zh": "查询一个或多个 ASIN 的产品、商户汇总和真实月份表现。",
+            "description_en": "Get product details, merchant summaries, and real month-by-month performance for one or more ASINs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "asins": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "pattern": r"^B[0-9A-Z]{9}$",
+                            "maxLength": 10,
+                        },
+                        "minItems": 1,
+                        "maxItems": 5,
+                    }
+                },
+                "required": ["asins"],
+                "additionalProperties": False,
+            },
+            "argument_fields": ("asins",),
+        },
     }
 
 
@@ -345,6 +387,11 @@ def validate_tool_arguments(tool_name: str, arguments: object) -> tuple[dict | N
             if error:
                 return None, error
             cleaned["tier"] = tier
+    elif tool_name == "asin_analysis":
+        asins, error = _asin_array(arguments.get("asins"), "asins")
+        if error:
+            return None, error
+        cleaned["asins"] = asins
     elif tool_name == "payment_status":
         if not arguments:
             return None, _error("invalid_arguments", "arguments")
@@ -482,7 +529,11 @@ def validate_tool_result(tool_name: str, result: object) -> tuple[dict | None, d
         if resolution is not None:
             normalized["resolution"] = resolution
 
-    maximum = AGENT_TIER_RESULT_MAX_BYTES if tool_name == "tier_analysis" else AGENT_RESULT_MAX_BYTES
+    maximum = (
+        AGENT_TIER_RESULT_MAX_BYTES
+        if tool_name in {"tier_analysis", "asin_analysis"}
+        else AGENT_RESULT_MAX_BYTES
+    )
     try:
         encoded = json.dumps(normalized, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     except (TypeError, ValueError):
