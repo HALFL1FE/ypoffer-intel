@@ -45,6 +45,7 @@ _DATA_PATTERN = re.compile(
 )
 _CONCEPT_PATTERN = re.compile(r"什么是|是什么意思|定义|含义|解释|如何计算|怎么算|怎么计算|what is|meaning|definition|how to calculate", re.I)
 _CONCRETE_PATTERN = re.compile(r"多少|数值|数据|查询|统计|列出|展示|提供|每个|分别|哪些|名单|列表|排名|top\s*\d+", re.I)
+_INITIAL_PLANNING_RETRYABLE_ERRORS = {"agent_planning_unavailable"}
 
 
 def _text(value: Any, maximum: int) -> str:
@@ -186,8 +187,9 @@ def _public_state(
     round_number: int = 1,
     status: str = "tools",
     legacy_parity: bool = False,
+    promotion_context: dict | None = None,
 ) -> dict:
-    return {
+    state = {
         "version": AGUI_STATE_VERSION,
         "status": status,
         "question": _text(question, 4000),
@@ -200,6 +202,9 @@ def _public_state(
         "round": round_number,
         "legacyParity": legacy_parity,
     }
+    if promotion_context:
+        state["promotionContext"] = promotion_context
+    return state
 
 
 def _tool_result_messages(messages: list[dict], calls: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -258,6 +263,7 @@ def _planning_events(body: dict, request_bytes: int, state_seed: dict) -> Iterab
     question = _last_user_question(_messages(body))
     language = "en" if state_seed.get("language") == "en" else "zh"
     memory = _text(state_seed.get("memory"), 8000)
+    promotion_context = state_seed.get("promotionContext") if isinstance(state_seed.get("promotionContext"), dict) else None
     history = state_seed.get("history")
     if not isinstance(history, list):
         history = _history(_messages(body), question)
@@ -266,12 +272,27 @@ def _planning_events(body: dict, request_bytes: int, state_seed: dict) -> Iterab
         for item in history if isinstance(item, dict) and item.get("role") in {"user", "assistant"}
     ][-4:]
     yield _timeline("planning", "planning", "running", "Planning", "Python registry is selecting read-only tools")
-    status, planning = plan_agent_request({
+    enabled_tools = [name for name in AGENT_TOOL_NAMES if promotion_context or name != "promotion_analysis"]
+    planning_request = {
         "contractVersion": AGENT_CONTRACT_VERSION,
         "question": question,
         "language": language,
-        "enabledTools": list(AGENT_TOOL_NAMES),
-    }, request_bytes)
+        "enabledTools": enabled_tools,
+        **({"promotionContext": promotion_context} if promotion_context else {}),
+    }
+    status, planning = plan_agent_request(planning_request, request_bytes)
+    code = _text(planning.get("errorCode"), 80) or "agent_planning_unavailable"
+    if status == 200 and planning.get("ok") is not True and code in _INITIAL_PLANNING_RETRYABLE_ERRORS:
+        yield _timeline("planning-retry", "planning", "running", "Retry planning", "A single controlled retry is allowed")
+        status, planning = plan_agent_request(planning_request, request_bytes)
+        retry_code = _text(planning.get("errorCode"), 80) or "agent_planning_unavailable"
+        yield _timeline(
+            "planning-retry",
+            "planning",
+            "done" if status == 200 and planning.get("ok") is True else "error",
+            "Retry planning",
+            "Plan recovered" if status == 200 and planning.get("ok") is True else retry_code,
+        )
     if status != 200 or planning.get("ok") is not True:
         code = _text(planning.get("errorCode"), 80) or "agent_planning_unavailable"
         yield _timeline("planning", "planning", "error", "Planning failed", code)
@@ -300,6 +321,7 @@ def _planning_events(body: dict, request_bytes: int, state_seed: dict) -> Iterab
         history=history,
         planning=planning,
         legacy_parity=state_seed.get("legacyParity") is True,
+        promotion_context=promotion_context,
     )
     yield _snapshot(state)
     yield from _emit_tool_batch(calls)
@@ -351,7 +373,8 @@ def _continuation_events(
             "contractVersion": AGENT_CONTRACT_VERSION,
             "question": state.get("question"),
             "language": state.get("language"),
-            "enabledTools": list(AGENT_TOOL_NAMES),
+            "enabledTools": [name for name in AGENT_TOOL_NAMES if state.get("promotionContext") or name != "promotion_analysis"],
+            **({"promotionContext": state.get("promotionContext")} if isinstance(state.get("promotionContext"), dict) else {}),
             "retry": {
                 "agentRunId": state.get("agentRunId"),
                 "previousPlanProof": proofs[-1],
@@ -380,6 +403,7 @@ def _continuation_events(
                 calls=next_calls,
                 round_number=2,
                 legacy_parity=state.get("legacyParity") is True,
+                promotion_context=state.get("promotionContext") if isinstance(state.get("promotionContext"), dict) else None,
             )
             next_state["omittedTargets"] = omitted_targets[:20]
             yield _timeline("replan", "planning", "done", "Replan ready")
@@ -402,7 +426,11 @@ def _continuation_events(
         "planProofs": proofs,
         "question": state.get("question"),
         "language": state.get("language"),
-        "context": {"memory": state.get("memory") or "", "history": state.get("history") or []},
+        "context": {
+            "memory": state.get("memory") or "",
+            "history": state.get("history") or [],
+            **({"promotionContext": state.get("promotionContext")} if isinstance(state.get("promotionContext"), dict) else {}),
+        },
         "toolResults": results,
     }
     validated, error = validate_synthesis_request(synthesis_body)

@@ -61,7 +61,25 @@ class AgentAguiTests(unittest.TestCase):
         body["state"]["offerIntelligence"]["legacyParity"] = True
         events = list(agent_agui.generate_agui_events(body))
         self.assertTrue(any(event.get("name") == "oi.planning_fallback" for event in events))
+        self.assertEqual(planning.call_count, 2)
         self.assertEqual(events[-1]["type"], "RUN_FINISHED")
+
+    @patch("agent_agui.plan_agent_request")
+    def test_initial_planning_retries_once_after_a_transient_unavailable_result(self, planning):
+        planning.side_effect = [
+            (200, {"ok": False, "errorCode": "agent_planning_unavailable"}),
+            (200, {
+                "ok": True,
+                "agentRunId": "ar_retry_agui_1234",
+                "planProof": "proof",
+                "toolCalls": [{"id": "r1c1", "name": "merchant_analysis", "arguments": {"merchant": "Tapo"}}],
+            }),
+        ]
+        events = list(agent_agui.generate_agui_events(self.body()))
+        self.assertEqual(planning.call_count, 2)
+        self.assertTrue(any(event.get("name") == "oi.timeline" and event["value"]["step"]["id"] == "planning-retry" for event in events))
+        self.assertEqual(events[-1]["type"], "RUN_FINISHED")
+        self.assertEqual(events[-1]["result"]["status"], "tools")
 
     @patch("agent_agui.plan_agent_request")
     def test_parity_preserves_prepared_history_in_continuation_state(self, planning):
@@ -75,6 +93,43 @@ class AgentAguiTests(unittest.TestCase):
         state = next(event["snapshot"]["offerIntelligence"] for event in events if event["type"] == "STATE_SNAPSHOT")
         self.assertEqual(state["history"], history)
         self.assertEqual(state["memory"], "Tier 2")
+
+    @patch("agent_agui.plan_agent_request")
+    def test_promotion_context_is_preserved_and_tool_is_hidden_without_it(self, planning):
+        planning.return_value = (200, {
+            "ok": True,
+            "agentRunId": "ar_promotion_agui",
+            "planProof": "proof",
+            "toolCalls": [{"id": "r1c1", "name": "merchant_analysis", "arguments": {"merchant": "First merchant"}}],
+        })
+        plain_events = list(agent_agui.generate_agui_events(self.body()))
+        plain_request = planning.call_args.args[0]
+        self.assertNotIn("promotion_analysis", plain_request["enabledTools"])
+        self.assertNotIn("promotionContext", plain_request)
+        self.assertNotIn("promotionContext", next(event["snapshot"]["offerIntelligence"] for event in plain_events if event["type"] == "STATE_SNAPSHOT"))
+
+        context = {
+            "attachmentId": "attachment-a",
+            "fileName": "campaign.csv",
+            "merchantCount": 1,
+            "merchants": [{"merchantId": "101", "merchantName": "First merchant"}],
+            "window": {
+                "launchDate": "2026-09-07",
+                "startDate": "2026-09-07",
+                "endDate": "2026-09-13",
+                "beforeStart": "2026-08-31",
+                "beforeEnd": "2026-09-06",
+                "days": 7,
+            },
+        }
+        body = self.body()
+        body["state"]["offerIntelligence"]["promotionContext"] = context
+        context_events = list(agent_agui.generate_agui_events(body))
+        context_request = planning.call_args.args[0]
+        self.assertIn("promotion_analysis", context_request["enabledTools"])
+        self.assertEqual(context_request["promotionContext"], context)
+        context_state = next(event["snapshot"]["offerIntelligence"] for event in context_events if event["type"] == "STATE_SNAPSHOT")
+        self.assertEqual(context_state["promotionContext"], context)
 
     def body(self):
         return {

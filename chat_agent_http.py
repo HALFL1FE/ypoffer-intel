@@ -38,6 +38,7 @@ PLANNING_PROMPT_ZH = (
     "6. 从用户话语中提取工具参数；Tier 商家列表使用 tier_analysis，默认第一页最多100个商户；用户要求下一页时使用 offset/limit。\n"
     "7. 不确定商户名或品类名时仍调用工具，工具会返回\"未找到\"。\n"
     "8. 付款月份未写年份时按当前年份理解，不要根据历史数据猜年份；只有用户明确写出历史年份时才使用历史月份。不要编造数值；工具结果中的数值是最终值，直接引用。"
+    "\n9. 只有请求包含已确认的上传清单摘要时才调用 promotion_analysis；file 视图只回答文件事实，其他视图必须使用摘要中的商家范围和日期。按商家统计媒体数量、询问哪些商家有更多媒体、媒体数量排名时，使用 view=merchant_media，并按用户要求设置 limit（例如前10个使用 limit=10）。不要把成交 ASIN 当成推广目标 ASIN。"
 )
 
 PLANNING_PROMPT_EN = (
@@ -51,6 +52,7 @@ PLANNING_PROMPT_EN = (
     "6. For a Tier merchant list, use tier_analysis; it returns up to 100 merchants per page by default, and offset/limit fetch the next page.\n"
     "7. Extract tool arguments from the user's words; when unsure about a merchant or category name, still call the tool — it will report \"not found\".\n"
     "8. When a payment month has no year, use the current calendar year rather than guessing from historical rows; use a historical year only when the user explicitly says so. Never invent numbers; values in tool results are final, quote them."
+    "\n9. Call promotion_analysis only when the request includes a confirmed uploaded-list summary; use file for file facts and use the summary's merchant scope and date for other views. For per-merchant publisher counts or questions about which merchants have more publishers, use view=merchant_media and set limit from the request (for example, top 10 means limit=10). Never treat a purchased ASIN as a promotion target ASIN."
 )
 
 SYNTHESIS_PROMPT_ZH = (
@@ -61,7 +63,7 @@ SYNTHESIS_PROMPT_ZH = (
     "merchant_analysis 结果中的 metrics 是当前缓存汇总，monthly 是真实数据库月度序列；如果 monthly 非空，必须把其中每一行都按月份展示，不能只回答最新月份。monthly 为空时才说明月度数据不可用。\n"
     "tier_analysis 结果中的 merchants 是按 Report Mode Tier 查询排序的当前商户页；必须展示用户要求的商户列表和关键指标，并结合 merchantList 的 total/offset/returned/hasMore 说明列表是否完整。hasMore 为 true 时不能声称已经列出全部商户。\n"
     "工具结果中的数值是计算好的最终值，直接引用，不要重新计算或外推新排名。\n"
-    "某个工具失败时，如实说明该部分数据缺失，不得编造。"
+    "某个工具失败时，如实说明该部分数据缺失，不得编造。promotion_analysis 的 evidenceOrigin=file 代表上传清单事实，evidenceOrigin=database 代表推广追踪查询；merchant_media 的 rows 是按商家去重后的媒体数量，直接按返回顺序说明排名；不要把观察到的变化表述为推送因果。"
 )
 
 SYNTHESIS_PROMPT_EN = (
@@ -72,7 +74,7 @@ SYNTHESIS_PROMPT_EN = (
     "In merchant_analysis results, metrics is the current cached summary and monthly is the real database monthly sequence; when monthly is non-empty, display every row by month and do not answer with only the latest month. An empty monthly array is the only indication that monthly data is unavailable.\n"
     "In tier_analysis results, merchants is the current merchant page ordered like the Report Mode Tier query; show the requested merchant list and key metrics, and use merchantList total/offset/returned/hasMore to state whether the page is complete. Never claim the full Tier list when hasMore is true.\n"
     "Values in tool results are final computed values; quote them and do not recompute or extrapolate new rankings.\n"
-    "When a tool failed, state plainly that this part of the data is missing; do not fabricate."
+    "When a tool failed, state plainly that this part of the data is missing; do not fabricate. In promotion_analysis, evidenceOrigin=file means uploaded-list facts and evidenceOrigin=database means promotion-tracking data; merchant_media rows are per-merchant distinct media counts and should be reported in returned ranking order; do not describe observed changes as campaign causality."
 )
 
 

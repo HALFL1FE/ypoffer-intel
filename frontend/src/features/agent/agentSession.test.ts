@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAgentSession, type AgentSessionRequest } from "./agentSession";
+import type { AgentPromotionAttachment } from "./agentAttachment";
+import { emptyMetrics } from "../offer-performance/performanceModel";
 
 const offers = [
   {
@@ -46,6 +48,73 @@ function streamResponse(content: string): Response {
 }
 
 describe("createAgentSession", () => {
+  it("carries the uploaded promotion scope into planning, tool execution, and synthesis", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const attachment: AgentPromotionAttachment = {
+      manifest: {
+        attachmentId: "attachment-a",
+        fileName: "campaign.csv",
+        merchantCount: 1,
+        merchants: [{ merchantId: "101", merchantName: "First merchant" }],
+        window: {
+          launchDate: "2026-09-07",
+          startDate: "2026-09-07",
+          endDate: "2026-09-13",
+          beforeStart: "2026-08-31",
+          beforeEnd: "2026-09-06",
+          days: 7,
+        },
+      },
+      offers: [{ merchantId: "101", merchantName: "First merchant", category: "Home", asins: [] }],
+      diagnostics: { totalRows: 1, invalidIdRows: 0, duplicateRows: 0, missingNameRows: 0, sheetsWithMerchantHeader: 1 },
+    };
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+      calls.push({ url, body });
+      if (url === "/api/chat/agent") return response({
+        ok: true,
+        agentRunId: "ar_promotion_session_1234",
+        planProof: "signed-proof",
+        toolCalls: [{ id: "r1c1", name: "promotion_analysis", arguments: { attachmentId: "attachment-a", view: "merchants", merchantIds: ["101"], window: attachment.manifest.window, metric: "revenue", sortBy: "after", direction: "desc", offset: 0, limit: 25 } }]
+      });
+      if (url === "/api/chat/stream") return streamResponse("上传清单商家分析完成");
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const session = createAgentSession({
+      offers,
+      language: "zh",
+      fetcher,
+      enableQuestionLogging: false,
+      enableTrace: false,
+      loadPromotionReport: async () => ({
+        ok: true,
+        availableThrough: "2026-09-20",
+        generatedAt: "2026-09-21",
+        clickSource: "click",
+        dateRange: { startDate: "2026-09-07", endDate: "2026-09-13", beforeStart: "2026-08-31", beforeEnd: "2026-09-06", days: 7 },
+        supported: { revenue: true, clicks: true, dpv: true, atc: true, orders: true, commission: true },
+        merchants: [{ merchantId: "101", before: { ...emptyMetrics(), revenue: 100 }, after: { ...emptyMetrics(), revenue: 120 }, daily: [], monthly: [] }]
+      })
+    });
+
+    const result = await session.submit({
+      prompt: "分析上传清单推送后一周表现",
+      language: "zh",
+      history: [],
+      memoryText: "",
+      signal: new AbortController().signal,
+      promotionAttachment: attachment
+    });
+
+    expect(result).toMatchObject({ ok: true, status: "done", response: "上传清单商家分析完成" });
+    expect(calls[0]!.body.promotionContext).toMatchObject({ attachmentId: "attachment-a", merchantCount: 1 });
+    const synthesis = calls.find((call) => call.url === "/api/chat/stream");
+    expect(synthesis?.body.context).toMatchObject({ promotionContext: { attachmentId: "attachment-a" } });
+    expect((synthesis?.body.toolResults as Array<Record<string, unknown>>)[0]).toMatchObject({ toolName: "promotion_analysis" });
+    expect(result.resultViews?.[0]?.toolName).toBe("promotion_analysis");
+  });
+
   it("sends the v2 planning contract without leaking tool schemas", async () => {
     const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -89,6 +158,43 @@ describe("createAgentSession", () => {
     });
     expect(calls[0]!.body.messages).toBeUndefined();
     expect(calls[0]!.body.tools).toBeUndefined();
+  });
+
+  it("retries an unavailable initial plan once and uses the recovered plan", async () => {
+    let planningAttempts = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url !== "/api/chat/agent") throw new Error(`unexpected URL ${url}`);
+      planningAttempts += 1;
+      if (planningAttempts === 1) return response({ ok: false, errorCode: "agent_planning_unavailable" });
+      return response({
+        ok: true,
+        contractVersion: "v2",
+        registryVersion: "agent-tools-v1",
+        agentRunId: "ar_retry_planning_1234",
+        content: "重试后成功规划",
+        toolCalls: [],
+        finishReason: "stop",
+      });
+    });
+    const session = createAgentSession({
+      offers,
+      language: "zh",
+      fetcher,
+      enableQuestionLogging: false,
+      enableTrace: false,
+    });
+
+    const result = await session.submit({
+      prompt: "查询当前推广数据",
+      language: "zh",
+      history: [],
+      memoryText: "",
+      signal: new AbortController().signal,
+    });
+
+    expect(planningAttempts).toBe(2);
+    expect(result).toMatchObject({ ok: true, status: "done", response: "重试后成功规划" });
   });
 
   it("executes planned tools in parallel and sends only projected results to synthesis", async () => {
