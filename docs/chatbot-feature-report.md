@@ -32,7 +32,9 @@ YeahPromos Offer Intelligence 内建了一个对话式 AI 助手，支持中英�
 >
 > Chat Mode 面对商户、品类、Tier、趋势和媒体等不同分析类型的内容与边界，见 [Chat Mode 不同分析类型说明](chat-mode-analysis-types.md)。
 
-> M6/M7 当前 Runtime（2026-09-04）：Chatbot Report/Chat、Deep Window 与独立 Agent 由 Vue session/页面渲染；Agent 进入页面后按需加载 `@copilotkit/vue`，通过真实 `/api/copilotkit` Runtime 和同源 `/api/chat/agui` 使用 Python registry。Node Runtime 先验证 v2 `oi_session`，再通过 `no-store` 的同源 `/api/auth/session` 探测确认当前数据库用户；Python AG-UI 也重新查询 `cnpscy_oi_user` 执行 Agent 页面权限。level=2 不允许 Agent，内部 token 只用于 Python AG-UI 调用；Python 继续拥有 7 工具 registry、参数/结果白名单、plan proof、批次、replan 与 synthesis。M7 已删除旧运行时及 parity/legacy runtime 开关；CopilotKit 不可用时停留在 Vue 页面并使用受控 modern session。
+> M6/M7 当前 Runtime（2026-09-04）：Chatbot Report/Chat、Deep Window 与独立 Agent 由 Vue session/页面渲染；Agent 进入页面后按需加载 `@copilotkit/vue`，通过真实 `/api/copilotkit` Runtime 和同源 `/api/chat/agui` 使用 Python registry。Node Runtime 先验证 v2 `oi_session`，再通过 `no-store` 的同源 `/api/auth/session` 探测确认当前数据库用户；Python AG-UI 也重新查询 `cnpscy_oi_user` 执行 Agent 页面权限。level=2 不允许 Agent，内部 token 只用于 Python AG-UI 调用；Python 继续拥有 8 工具 registry、参数/结果白名单、plan proof、批次、replan 与 synthesis。M7 已删除旧运行时及 parity/legacy runtime 开关；CopilotKit 不可用时停留在 Vue 页面并使用受控 modern session。
+
+> Agent ASIN 支持（2026-09-11）：Agent 注册表新增 `asin_analysis`，与现有 ASIN 数据接口 `/api/ui/db/asin` 对接；一次可查询最多 5 个 ASIN，返回产品/商户汇总 `rows` 与真实数据库月份明细 `monthly`。ASIN 不再按商户名解析，结果展示保留 ASIN、商户和月份维度；原始工具载荷仍不会进入结构化记忆。
 
 ### M6 CopilotKit Agent 迁移边界（历史记录，2026-09-03）
 
@@ -47,7 +49,7 @@ YeahPromos Offer Intelligence 内建了一个对话式 AI 助手，支持中英�
 #### Agent 工作台、命令与回测
 
 - 新工作台继续挂在 `agentModernRoot`，外部 `primarySidebar` 导航不替换；桌面保留右侧查询详情，窄屏可展开。输入栏在浏览旧内容且没有草稿时收起，点击恢复，尊重 reduced-motion。
-- `/` 菜单复用 `ChatbotCommandMenu.vue`，Agent 提供 14 个可筛选的命令，支持方向键、Enter、Escape 和中文输入法。商户/品类/Tier/对比/付款/趋势命令补充原有 Agent 查询；`/publisher`、`/publisherprofile` 使用现有媒体数据和 Report renderer，等待数据完成后通过 `ChatbotResultView` 显示，不向 Python 注册虚构工具。
+- `/` 菜单复用 `ChatbotCommandMenu.vue`，Agent 提供 15 个可筛选的命令，支持方向键、Enter、Escape 和中文输入法。商户/ASIN/品类/Tier/对比/付款/趋势命令补充原有 Agent 查询；`/publisher`、`/publisherprofile` 使用现有媒体数据和 Report renderer，等待数据完成后通过 `ChatbotResultView` 显示，不向 Python 注册虚构工具。
 - CopilotKit 页通过 `createAgentActivity()` 保留原问题日志及反馈机制。原 SVG 趋势图、12 指标切换、结果 registry、停止及成功后历史/记忆规则保持。
 - 用户可从“日志 → 对话日志与回测”或错误后的日志面板下载/导入 JSON、主动上传、选择某一轮重新运行并对照原回答。最近最多 10 轮、512 KB；记录问题、原历史与结构化记忆、回答、受控错误码和时间线，不导出 HTML、cookie、plan proof 或原始工具载荷。回测使用原语言/历史/记忆和**当前数据/模型**，不是旧数据快照重放，也不会自动修改代码。
 - 本地和 Vercel 共用 `agent_debug_http.py`，在 `/api/chat/stream?operation=agent_debug` 提供认证后的 POST 写入与 GET `id` 读取；不新增 Vercel function。上传显式写入 `cnpscy_oi_agent_debug_cases`，首写按现有 DB 模式建表；无 DDL 权限时可预先使用 `docs/agent-debug-cases.sql`。存储不可用返回 502，前端保留下载入口。未向真实 DB 写入测试日志。
@@ -394,7 +396,9 @@ call_llm()         → 统一调用入口 (OpenAI 兼容 / Anthropic SDK)
 call_llm_tools()   → Agent 规划调用，归一化 DeepSeek/Claude 工具结果
 ```
 
-`chat_agent_http.py` 负责 Agent 规划端点的请求大小、消息角色、工具名称和双语提示词校验；工具执行仍在浏览器 `public/app.js` 中完成。
+`chat_agent_http.py` 负责 Agent 规划端点的请求大小、消息角色、工具名称和双语提示词校验；现代 Agent 工具执行在 Vue `frontend/src/features/agent/agentSession.ts` 中完成。
+
+`asin_analysis` 通过同源 `/api/ui/db/asin?asins=...&months=12` 读取 ASIN 产品、商户和月份表现；Agent 只向综合模型传递受控的 `rows`、`monthly`、`notFound`、来源和时间字段，最多处理 5 个 ASIN。
 
 `merchant_analysis` 的 `metrics` 是当前缓存商户汇总，`monthly` 是按最新月份在前排列的真实 DB 月度数据。月度数据由 `fetchMerchantMonthlyRows()` → `fetchMerchantMetrics()` → `/api/ui/db/merchant?months=12&minimal=1` 获取，并使用 `mergeMonthIntoOffer()` 保持与 Report Mode 月份概览相同的 EPC、AOV、CVR、Commission、Orders、Clicks、DPV 和 ATC 口径；月度接口不可用时 `monthly=[]`、`monthlyDataSource="unavailable"`，不伪造月度值。综合模型若只引用最新月份，`runChatAgent()` 会从已完成的工具结果中补回完整月度表。
 
@@ -597,7 +601,7 @@ public/
 ```
 llm_provider.py               ← LLM Provider 抽象（DeepSeek/Claude）
 chat_agent_http.py            ← Chat Mode Agent 规划端点、工具白名单和双语提示词
-agent_tool_registry.py        ← 七个 Agent 工具的唯一注册表、参数和结果白名单
+agent_tool_registry.py        ← 八个 Agent 工具的唯一注册表、参数和结果白名单
 agent_contract.py             ← Agent v2 请求校验、计划证明和服务端消息组装
 llm_classify.py               ← 意图分类 + 分析文字生成编排层
 server.py                     ← 本地服务器（/api/chat/* 路由）
@@ -753,7 +757,7 @@ Trace 写入是异步、短超时和可丢弃的：网络或数据库写入失�
 
 计划证明使用 `OI_SESSION_SECRET` 的独立 HMAC purpose，有效期 600 秒，绑定运行 ID、问题哈希、注册表版本、调用 ID、工具名和参数哈希。固定错误码包括 `agent_contract_version_required`、`unsupported_tool`、`invalid_arguments`、`invalid_tool_result`、`run_binding_failed`、`agent_planning_unavailable` 和 `agent_synthesis_unavailable`。客户端提交旧 `messages`、未知字段、篡改参数或过期证明时不会进入 Provider。
 
-边界必须明确：当前七个工具仍由浏览器执行，HMAC 只能证明运行和调用元数据未被替换，不能证明浏览器返回的数据值真实；数据值真实性需要未来的服务端工具执行方案。该实现不新增数据库表、字段或 Trace 持久化内容，也不把问题、完整消息、工具参数、工具结果、答案正文或异常堆栈写入 Trace。
+边界必须明确：当时的七个工具仍由浏览器执行，HMAC 只能证明运行和调用元数据未被替换，不能证明浏览器返回的数据值真实；数据值真实性需要未来的服务端工具执行方案。该实现不新增数据库表、字段或 Trace 持久化内容，也不把问题、完整消息、工具参数、工具结果、答案正文或异常堆栈写入 Trace。
 
 ### Agent 结构化对话记忆（2026-08-26）
 

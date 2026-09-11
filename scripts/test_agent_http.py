@@ -209,6 +209,8 @@ def test_planning_prompt_distinguishes_lookup_from_comparison():
     assert "明确要求" in zh and "分别" in zh
     assert "merchant_analysis" in en and "merchant_comparison" in en
     assert "explicitly asks" in en.lower() and "one merchant_analysis" in en.lower()
+    assert "asin_analysis" in zh and "ASIN" in zh
+    assert "asin_analysis" in en and "ASIN" in en
 
 
 def test_planning_prompt_routes_explicit_trends_to_trend_tool():
@@ -225,6 +227,8 @@ def test_synthesis_prompt_language():
     assert zh != en and "不要" in zh and "do not" in en.lower()
     assert "monthly" in zh and "每一行" in zh and "不能只回答最新月份" in zh
     assert "monthly" in en.lower() and "every row" in en.lower() and "latest month" in en.lower()
+    assert "asin_analysis" in zh and "monthly" in zh
+    assert "asin_analysis" in en and "monthly" in en.lower()
 
 
 def main():

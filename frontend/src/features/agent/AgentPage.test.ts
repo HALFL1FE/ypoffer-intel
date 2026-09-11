@@ -48,7 +48,7 @@ describe("AgentPage", () => {
     const wrapper = mount(AgentPage, { props: { language: "en", run, autoFocus: false } });
     const field = wrapper.get('[data-agent-input]');
     await field.setValue('/');
-    expect(wrapper.findAll('[role="option"]')).toHaveLength(14);
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(15);
     await field.setValue('/pub');
     expect(wrapper.findAll('[role="option"]')).toHaveLength(2);
     await field.trigger('keydown', { key: 'Enter', isComposing: true });
@@ -64,6 +64,10 @@ describe("AgentPage", () => {
     await field.trigger('keydown', { key: 'Enter' });
     await flushPromises();
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'Analyze merchant Tapo' }));
+    await field.setValue('/asin B0D2HKCMBP');
+    await field.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    expect(run).toHaveBeenLastCalledWith(expect.objectContaining({ prompt: 'Look up ASIN B0D2HKCMBP' }));
     wrapper.unmount();
   });
 

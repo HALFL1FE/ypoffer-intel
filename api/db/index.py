@@ -14,6 +14,7 @@ from google_ads_workbench import (
 from offer_db import (
     DIGITS_RE,
     add_merchant_to_tier1,
+    asin_payload,
     delete_monthly_new_merchant,
     first_query_value,
     handle_options,
@@ -44,6 +45,7 @@ from offer_db import (
 PAGE_ACCESS_BY_ROUTE = {
     "ui-status": "dashboard",
     "ui-merchant": "dashboard",
+    "ui-asin": "dashboard",
     "ui-search": "dashboard",
     "ui-keywords": "dashboard",
     "ui-offers": "dashboard",
@@ -125,6 +127,20 @@ def handle_merchant(target, query):
         send_db_error(target, error)
 
 
+def handle_asin(target, query):
+    raw_asins = first_query_value(query, "asins") or first_query_value(query, "asin")
+    if not raw_asins:
+        send_json(target, 400, {"ok": False, "error": "asins is required"})
+        return
+    months = int_query_value(query, "months", 12, 1, 24)
+    try:
+        send_json(target, 200, asin_payload(raw_asins, months=months))
+    except ValueError as error:
+        send_json(target, 400, {"ok": False, "error": str(error)})
+    except Exception as error:
+        send_db_error(target, error)
+
+
 def handle_search(target, query):
     text = first_query_value(query, "q")
     limit = int_query_value(query, "limit", 25, 1, 50)
@@ -161,6 +177,43 @@ def handle_ui_merchant(target, query):
             200,
             merchant_payload(merchant_id, product_limit=limit, months=months, minimal=minimal),
         )
+    except ValueError as error:
+        send_json(target, 400, {"ok": False, "error": str(error)})
+    except Exception as error:
+        send_db_error(target, error)
+
+
+def public_asin_payload(payload):
+    """Keep browser-safe ASIN results within the published merchant snapshot."""
+    public_ids = set(read_static_merchant_ids())
+    rows = [
+        row for row in payload.get("rows", [])
+        if str(row.get("merchantId") or "") in public_ids
+    ]
+    visible_asins = {
+        str(row.get("asin") or "").strip().upper()
+        for row in rows
+    }
+    result = {**payload, "rows": rows}
+    result["unmatched"] = [
+        asin for asin in payload.get("asins", [])
+        if str(asin).upper() not in visible_asins
+    ]
+    result["available"] = bool(payload.get("available")) and bool(rows)
+    return result
+
+
+def handle_ui_asin(target, query):
+    raw_asins = first_query_value(query, "asins") or first_query_value(query, "asin")
+    if not raw_asins:
+        send_json(target, 400, {"ok": False, "error": "asins is required"})
+        return
+    try:
+        payload = asin_payload(
+            raw_asins,
+            months=int_query_value(query, "months", 12, 1, 24),
+        )
+        send_json(target, 200, public_asin_payload(payload))
     except ValueError as error:
         send_json(target, 400, {"ok": False, "error": str(error)})
     except Exception as error:
@@ -503,6 +556,8 @@ def app(environ, start_response):
                 handle_ui_status(target, query)
             elif route == "ui-merchant":
                 handle_ui_merchant(target, query)
+            elif route == "ui-asin":
+                handle_ui_asin(target, query)
             elif route == "ui-search":
                 handle_ui_search(target, query)
             elif route == "ui-keywords":
@@ -533,6 +588,8 @@ def app(environ, start_response):
             handle_status(target, query)
         elif route == "merchant":
             handle_merchant(target, query)
+        elif route == "asin":
+            handle_asin(target, query)
         elif route == "search":
             handle_search(target, query)
         else:

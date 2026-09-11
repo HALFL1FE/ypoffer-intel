@@ -19,6 +19,8 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_]+$")
 DIGITS_RE = re.compile(r"^\d+$")
+ASIN_RE = re.compile(r"^B[0-9A-Z]{9}$", re.IGNORECASE)
+MAX_ASIN_QUERY = 25
 TABLE_COLUMNS_CACHE: dict[str, set[str]] = {}
 
 DB_ENV_KEYS = (
@@ -502,6 +504,29 @@ def pick_column(columns: set[str], candidates: list[str]) -> str | None:
         if lowered in lower_map:
             return lower_map[lowered]
     return None
+
+
+def normalize_asin_query(value: str | list[str] | tuple[str, ...]) -> list[str]:
+    """Normalize and validate one or more ASINs from an API request."""
+    raw_values = value if isinstance(value, (list, tuple)) else re.split(r"[\s,]+", str(value or ""))
+    normalized: list[str] = []
+    invalid: list[str] = []
+    for raw_value in raw_values:
+        candidate = str(raw_value or "").strip().upper()
+        if not candidate:
+            continue
+        if not ASIN_RE.fullmatch(candidate):
+            invalid.append(candidate)
+            continue
+        if candidate not in normalized:
+            normalized.append(candidate)
+    if invalid:
+        raise ValueError("asins must contain valid Amazon ASINs")
+    if not normalized:
+        raise ValueError("asins is required")
+    if len(normalized) > MAX_ASIN_QUERY:
+        raise ValueError(f"asins cannot contain more than {MAX_ASIN_QUERY} values")
+    return normalized
 
 
 def first_expr(sources: list[tuple[str, set[str]]], candidates: list[str], alias: str, default: str = "NULL") -> str:
@@ -1613,6 +1638,347 @@ def merchant_products_for_ids(
         tuple(normalized_ids),
     )
     return [compact_api_row(row) for row in rows]
+
+
+def asin_product_rows(conn, asins: list[str]) -> list[dict[str, Any]]:
+    """Load product identity fields for the requested ASINs."""
+    product_cols = table_columns(conn, "cnpscy_amazon_product")
+    product_asin = pick_column(product_cols, ["asin", "product_asin"])
+    if not product_asin:
+        return []
+
+    extra_cols = table_columns(conn, "cnpscy_amazon_product_extra")
+    sources = [("p", product_cols)]
+    joins: list[str] = []
+    product_id = pick_column(product_cols, ["advert_id", "merchant_id"])
+    extra_id = pick_column(extra_cols, ["advert_id", "merchant_id"])
+    extra_asin = pick_column(extra_cols, ["asin", "product_asin"])
+    if extra_id:
+        conditions = [f"e.{q(extra_id)} = p.{q(product_id)}"] if product_id else []
+        if product_asin and extra_asin:
+            conditions.append(f"e.{q(extra_asin)} = p.{q(product_asin)}")
+        if conditions:
+            joins.append(
+                f"LEFT JOIN {q('cnpscy_amazon_product_extra')} e ON {' AND '.join(conditions)}"
+            )
+            sources.append(("e", extra_cols))
+
+    merchant_select = (
+        f"CAST(p.{q(product_id)} AS CHAR) AS {q('merchantId')}"
+        if product_id
+        else f"NULL AS {q('merchantId')}"
+    )
+    selects = [
+        merchant_select,
+        first_expr(sources, ["asin", "product_asin"], "asin"),
+        first_expr(sources, ["product_name", "title", "name"], "productName"),
+        first_expr(
+            sources,
+            ["product_url", "url", "link", "product_link", "amazon_url", "amazon_link"],
+            "productUrl",
+        ),
+        first_expr(
+            sources,
+            ["deal_price", "sale_price", "price", "product_price"],
+            "dealPrice",
+        ),
+        first_expr(
+            sources,
+            ["original_price", "list_price", "msrp", "regular_price"],
+            "originalPrice",
+        ),
+        first_expr(
+            sources,
+            ["discount_percent", "discount_percentage", "discount_rate", "discount"],
+            "discountPercent",
+        ),
+        first_expr(
+            sources,
+            ["category", "category_name", "main_category"],
+            "category",
+        ),
+        first_expr(
+            sources,
+            ["payout_aff", "commission_rate", "product_commission"],
+            "commissionRate",
+        ),
+        first_expr(sources, ["updated_at", "update_time", "created_at"], "updatedAt"),
+    ]
+    placeholders = ", ".join(["%s"] * len(asins))
+    order_column = pick_column(product_cols, ["updated_at", "update_time", "created_at"])
+    order_sql = f"ORDER BY p.{q(order_column)} DESC" if order_column else ""
+    rows = fetch_all(
+        conn,
+        f"""
+        SELECT {", ".join(selects)}
+        FROM {q("cnpscy_amazon_product")} p
+        {" ".join(joins)}
+        WHERE CAST(p.{q(product_asin)} AS CHAR) IN ({placeholders})
+        {order_sql}
+        LIMIT 5000
+        """,
+        tuple(asins),
+    )
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        compact = compact_api_row(row) or {}
+        asin = str(compact.get("asin") or "").strip().upper()
+        if not asin:
+            continue
+        compact["asin"] = asin
+        if "discountPercent" not in compact:
+            original = to_float(compact.get("originalPrice"))
+            deal = to_float(compact.get("dealPrice"))
+            if original > 0 and 0 <= deal < original:
+                compact["discountPercent"] = round((1 - deal / original) * 100, 6)
+        normalized.append(compact)
+    return normalized
+
+
+def _finalize_asin_metric_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Add the same derived metrics used by merchant-level reporting."""
+    clicks = to_float(row.get("clicks"))
+    orders = to_float(row.get("orders"))
+    revenue = to_float(row.get("revenue"))
+    payout = to_float(row.get("payout"))
+    affiliate_payout = to_float(row.get("affiliatePayout"))
+    row["salesAmount"] = round(revenue, 6)
+    row["allCommission"] = round(payout, 6)
+    row["affCommission"] = round(affiliate_payout, 6)
+    row["allEpc"] = round(commission_amount_epc(payout, clicks), 6)
+    row["affEpc"] = round(commission_amount_epc(affiliate_payout, clicks), 6)
+    row["epc"] = row["affEpc"]
+    row["aov"] = round(revenue / orders, 6) if orders else 0
+    row["conversionRate"] = round(orders / clicks, 6) if clicks else 0
+    return row
+
+
+def asin_metric_rows(
+    conn,
+    asins: list[str],
+    months: int,
+) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    """Aggregate order and click data by ASIN, merchant, and calendar month."""
+    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    metric_keys = (
+        "orders", "revenue", "payout", "affiliatePayout", "clicks",
+        "dpv", "atc", "directSales", "haloSales",
+    )
+    placeholders = ", ".join(["%s"] * len(asins))
+
+    order_cols = table_columns(conn, "cnpscy_amazon_order")
+    order_asin = pick_column(
+        order_cols,
+        ["asin", "product_asin", "item_asin", "amazon_asin", "product_id", "item_id", "sku"],
+    )
+    order_merchant = pick_column(order_cols, ["advert_id", "merchant_id"])
+    order_date = pick_column(order_cols, ["order_time_day", "order_date", "order_time"])
+    if order_asin and order_merchant and order_date:
+        month = month_expr("o", order_date)
+        orders_expr = (
+            f"SUM(COALESCE(o.{q('total_purchases')}, 0)) AS {q('orders')}"
+            if "total_purchases" in order_cols
+            else f"COUNT(*) AS {q('orders')}"
+        )
+        rows = fetch_all(
+            conn,
+            f"""
+            SELECT
+                UPPER(TRIM(CAST(o.{q(order_asin)} AS CHAR))) AS {q("asin")},
+                CAST(o.{q(order_merchant)} AS CHAR) AS {q("merchantId")},
+                {month} AS {q("month")},
+                {orders_expr},
+                {sum_expr("o", order_cols, ["amount", "sales_amount", "revenue"], "revenue")},
+                {sum_expr("o", order_cols, ["payout", "commission"], "payout")},
+                {sum_expr("o", order_cols, ["aff_payout", "affiliate_payout"], "affiliatePayout")},
+                {sum_expr("o", order_cols, ["total_clicks", "clicks", "click_num"], "clicks")},
+                {sum_expr("o", order_cols, ["detail_page_views", "dpv", "dpv_num"], "dpv")},
+                {sum_expr("o", order_cols, ["add_to_carts", "atc", "atc_num"], "atc")},
+                {sum_expr("o", order_cols, ["direct_sales", "directSales", "direct_sale_amount"], "directSales")},
+                {sum_expr("o", order_cols, ["halo_sales", "haloSales", "halo_sale_amount"], "haloSales")}
+            FROM {q("cnpscy_amazon_order")} o
+            WHERE UPPER(TRIM(CAST(o.{q(order_asin)} AS CHAR))) IN ({placeholders})
+            GROUP BY o.{q(order_asin)}, o.{q(order_merchant)}, {month}
+            ORDER BY {q("asin")}, {q("merchantId")}, {q("month")} DESC
+            """,
+            tuple(asins),
+        )
+        for raw in rows:
+            asin = str(raw.get("asin") or "").strip().upper()
+            merchant_id = str(raw.get("merchantId") or "").strip()
+            month_key = normalize_month(raw.get("month"))
+            if not asin or not merchant_id or not month_key:
+                continue
+            values = {
+                "month": month_key,
+                **{
+                    key: to_float(raw.get(key))
+                    for key in metric_keys
+                },
+            }
+            grouped[(asin, merchant_id, month_key)] = values
+
+    click_cols = table_columns(conn, "cnpscy_amazon_click")
+    click_asin = pick_column(
+        click_cols,
+        ["asin", "product_asin", "item_asin", "amazon_asin", "product_id", "item_id", "sku"],
+    )
+    click_merchant = pick_column(click_cols, ["advert_id", "merchant_id"])
+    click_date = pick_column(click_cols, ["time_day", "click_time_day", "click_date", "time"])
+    if click_asin and click_merchant and click_date:
+        month = month_expr("c", click_date)
+        rows = fetch_all(
+            conn,
+            f"""
+            SELECT
+                UPPER(TRIM(CAST(c.{q(click_asin)} AS CHAR))) AS {q("asin")},
+                CAST(c.{q(click_merchant)} AS CHAR) AS {q("merchantId")},
+                {month} AS {q("month")},
+                {sum_expr("c", click_cols, ["click", "clicks", "click_num"], "rawClicks")}
+            FROM {q("cnpscy_amazon_click")} c
+            WHERE UPPER(TRIM(CAST(c.{q(click_asin)} AS CHAR))) IN ({placeholders})
+            GROUP BY c.{q(click_asin)}, c.{q(click_merchant)}, {month}
+            ORDER BY {q("asin")}, {q("merchantId")}, {q("month")} DESC
+            """,
+            tuple(asins),
+        )
+        for raw in rows:
+            asin = str(raw.get("asin") or "").strip().upper()
+            merchant_id = str(raw.get("merchantId") or "").strip()
+            month_key = normalize_month(raw.get("month"))
+            if not asin or not merchant_id or not month_key:
+                continue
+            key = (asin, merchant_id, month_key)
+            target = grouped.setdefault(
+                key,
+                {"month": month_key, **{metric: 0 for metric in metric_keys}},
+            )
+            click_total = to_float(raw.get("rawClicks"))
+            if not to_float(target.get("clicks")) and click_total:
+                target["clicks"] = click_total
+
+    result: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    by_entity: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for (asin, merchant_id, _month), row in grouped.items():
+        by_entity.setdefault((asin, merchant_id), []).append(
+            _finalize_asin_metric_row({"asin": asin, "merchantId": merchant_id, **row})
+        )
+    for entity, entity_rows in by_entity.items():
+        entity_rows.sort(key=lambda row: str(row.get("month") or ""), reverse=True)
+        selected = entity_rows[:max(1, int(months))]
+        result[entity] = sorted(selected, key=lambda row: str(row.get("month") or ""))
+    return result
+
+
+def asin_merchant_names(conn, merchant_ids: list[str]) -> dict[str, str]:
+    if not merchant_ids:
+        return {}
+    columns = table_columns(conn, "cnpscy_advert")
+    id_column = pick_column(columns, ["advert_id", "merchant_id"])
+    name_column = pick_column(columns, ["advert_name", "merchant_name", "brand_name", "name"])
+    if not id_column or not name_column:
+        return {}
+    placeholders = ", ".join(["%s"] * len(merchant_ids))
+    rows = fetch_all(
+        conn,
+        f"""
+        SELECT CAST(a.{q(id_column)} AS CHAR) AS {q("merchantId")},
+               a.{q(name_column)} AS {q("merchantName")}
+        FROM {q("cnpscy_advert")} a
+        WHERE a.{q(id_column)} IN ({placeholders})
+        """,
+        tuple(merchant_ids),
+    )
+    return {
+        str(row.get("merchantId") or "").strip(): str(row.get("merchantName") or "").strip()
+        for row in rows
+        if str(row.get("merchantId") or "").strip() and str(row.get("merchantName") or "").strip()
+    }
+
+
+def asin_payload(
+    asins: str | list[str] | tuple[str, ...],
+    months: int = 12,
+) -> dict[str, Any]:
+    """Return ASIN product metadata and per-ASIN monthly performance."""
+    normalized_asins = normalize_asin_query(asins)
+    bounded_months = max(1, min(int(months), 24))
+    cache_key = f"asin:{','.join(normalized_asins)}:{bounded_months}"
+    now = time.time()
+    cached = _asin_cache.get(cache_key)
+    if cached is not None and now - cached[0] < ASIN_CACHE_TTL:
+        return cached[1]
+
+    with db_connection() as conn:
+        products = asin_product_rows(conn, normalized_asins)
+        monthly = asin_metric_rows(conn, normalized_asins, bounded_months)
+        merchant_ids = sorted({
+            merchant_id
+            for asin, merchant_id in monthly
+            if asin in normalized_asins and merchant_id
+        } | {
+            str(row.get("merchantId") or "").strip()
+            for row in products
+            if str(row.get("merchantId") or "").strip()
+        })
+        merchant_names = asin_merchant_names(conn, merchant_ids)
+
+    product_map: dict[tuple[str, str], dict[str, Any]] = {}
+    product_only: dict[tuple[str, str], dict[str, Any]] = {}
+    for product in products:
+        asin = str(product.get("asin") or "").strip().upper()
+        merchant_id = str(product.get("merchantId") or "").strip()
+        if asin in normalized_asins:
+            product_map.setdefault((asin, merchant_id), product)
+            product_only[(asin, merchant_id)] = product
+
+    entity_keys = set(monthly) | set(product_only)
+    rows: list[dict[str, Any]] = []
+    for asin in normalized_asins:
+        for entity_asin, merchant_id in sorted(entity_keys):
+            if entity_asin != asin:
+                continue
+            product = product_map.get((asin, merchant_id), {})
+            month_rows = monthly.get((asin, merchant_id), [])
+            row: dict[str, Any] = {
+                **product,
+                "asin": asin,
+                "matchedAsins": [asin],
+                "merchantId": merchant_id,
+                "merchantName": merchant_names.get(merchant_id) or product.get("merchantName"),
+                "monthly": month_rows,
+                "asinPerformanceAvailable": bool(month_rows),
+            }
+            totals: dict[str, Any] = {
+                "orders": sum(to_float(item.get("orders")) for item in month_rows),
+                "revenue": sum(to_float(item.get("revenue")) for item in month_rows),
+                "payout": sum(to_float(item.get("payout")) for item in month_rows),
+                "affiliatePayout": sum(to_float(item.get("affiliatePayout")) for item in month_rows),
+                "clicks": sum(to_float(item.get("clicks")) for item in month_rows),
+                "dpv": sum(to_float(item.get("dpv")) for item in month_rows),
+                "atc": sum(to_float(item.get("atc")) for item in month_rows),
+                "directSales": sum(to_float(item.get("directSales")) for item in month_rows),
+                "haloSales": sum(to_float(item.get("haloSales")) for item in month_rows),
+            }
+            if month_rows:
+                row.update(_finalize_asin_metric_row(totals))
+            if not row.get("merchantName"):
+                row.pop("merchantName", None)
+            rows.append(row)
+
+    matched = {str(row.get("asin") or "").strip().upper() for row in rows}
+    result = {
+        "ok": True,
+        "checkedAt": utc_now_iso(),
+        "asins": normalized_asins,
+        "rows": rows,
+        "unmatched": [asin for asin in normalized_asins if asin not in matched],
+        "available": bool(monthly),
+        "source": "cnpscy_amazon_order + cnpscy_amazon_click + cnpscy_amazon_product",
+        "grain": "asin + merchant + month",
+    }
+    _asin_cache[cache_key] = (now, result)
+    return result
 
 
 def merchant_amazon_metrics(conn, merchant_id: str, months: int = 12) -> list[dict[str, Any]]:
@@ -2910,6 +3276,7 @@ PUBLISHERS_CACHE_FILE = CACHE_DIR / "db_publishers_cache.json"
 CACHE_TTL_SECONDS = int(os.environ.get("OFFER_DB_CACHE_TTL", "86400"))  # 24 hours
 MERCHANT_CACHE_TTL = int(os.environ.get("OFFER_DB_MERCHANT_CACHE_TTL", "3600"))  # 1 hour
 SEARCH_CACHE_TTL = int(os.environ.get("OFFER_DB_SEARCH_CACHE_TTL", "3600"))  # 1 hour
+ASIN_CACHE_TTL = int(os.environ.get("OFFER_DB_ASIN_CACHE_TTL", "300"))  # 5 minutes
 STATUS_CACHE_TTL = int(os.environ.get("OFFER_DB_STATUS_CACHE_TTL", "600"))   # 10 min
 TIER_REPORT_CACHE_TTL = int(os.environ.get("OFFER_DB_TIER_REPORT_CACHE_TTL", "300"))
 PUBLISHERS_CACHE_TTL = int(os.environ.get("OFFER_DB_PUBLISHERS_CACHE_TTL", "3600"))  # 1 hour
@@ -2920,6 +3287,7 @@ CHATBOT_CACHE_TTL = int(os.environ.get("OFFER_DB_CHATBOT_CACHE_TTL", "300"))  # 
 _bg_refresh_running: dict[str, bool] = {}
 _merchant_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _search_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_asin_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _status_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _tier_sheet_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _publisher_portfolio_cache: dict[str, tuple[float, dict[str, Any]]] = {}

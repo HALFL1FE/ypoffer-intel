@@ -57,6 +57,7 @@ from agent_contract import (
 )
 from offer_db import (
     add_merchant_to_tier1,
+    asin_payload,
     chatbot_offers_payload,
     delete_monthly_new_merchant,
     DIGITS_RE,
@@ -119,6 +120,7 @@ STATIC_DIR = ROOT / "public"
 UI_DB_PAGE_BY_PATH = {
     "/api/ui/db/status": "dashboard",
     "/api/ui/db/merchant": "dashboard",
+    "/api/ui/db/asin": "dashboard",
     "/api/ui/db/search": "dashboard",
     "/api/ui/db/offers": "dashboard",
     "/api/ui/db/chatbot-offers": "dashboard",
@@ -602,6 +604,34 @@ class Handler(BaseHTTPRequestHandler):
                         "monthlyAggregateMetrics": [],
                     })
                     return
+                self.send_json(200, payload)
+                return
+
+            if parsed.path == "/api/ui/db/asin":
+                raw_asins = first_query_value(query, "asins") or first_query_value(query, "asin")
+                if not raw_asins:
+                    self.send_json(400, {"ok": False, "error": "asins is required"})
+                    return
+                months = int_query_value(query, "months", 12, 1, 24)
+                payload = asin_payload(raw_asins, months=months)
+                public_ids = set(read_static_merchant_ids())
+                rows = [
+                    row for row in payload.get("rows", [])
+                    if str(row.get("merchantId") or "") in public_ids
+                ]
+                visible_asins = {
+                    str(row.get("asin") or "").strip().upper()
+                    for row in rows
+                }
+                payload = {
+                    **payload,
+                    "rows": rows,
+                    "unmatched": [
+                        asin for asin in payload.get("asins", [])
+                        if str(asin).upper() not in visible_asins
+                    ],
+                    "available": bool(payload.get("available")) and bool(rows),
+                }
                 self.send_json(200, payload)
                 return
 

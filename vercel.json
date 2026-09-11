@@ -35,6 +35,18 @@
       ]
     },
     {
+      "src": "^/api/db/asin/?$",
+      "dest": "/api/db/index",
+      "transforms": [
+        {
+          "type": "request.headers",
+          "op": "set",
+          "target": { "key": "x-oi-db-route" },
+          "args": "asin"
+        }
+      ]
+    },
+    {
       "src": "^/api/db/search/?$",
       "dest": "/api/db/index",
       "transforms": [
@@ -67,6 +79,18 @@
           "op": "set",
           "target": { "key": "x-oi-db-route" },
           "args": "ui-merchant"
+        }
+      ]
+    },
+    {
+      "src": "^/api/ui/db/asin/?$",
+      "dest": "/api/db/index",
+      "transforms": [
+        {
+          "type": "request.headers",
+          "op": "set",
+          "target": { "key": "x-oi-db-route" },
+          "args": "ui-asin"
         }
       ]
     },

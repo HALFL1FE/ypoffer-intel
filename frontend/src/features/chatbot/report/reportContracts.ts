@@ -221,6 +221,7 @@ export interface ReportDataProvider {
   paymentRecords?(signal: AbortSignal): Promise<readonly ReportRow[]>;
   keywords(signal: AbortSignal): Promise<unknown>;
   merchant(merchantId: string, months: number, signal: AbortSignal): Promise<unknown>;
+  asin?(asins: readonly string[], months: number, signal: AbortSignal): Promise<unknown>;
   search(query: string, signal: AbortSignal): Promise<unknown>;
   publishers(signal: AbortSignal): Promise<unknown>;
   publisherPortfolio(userId: string, startDate: string | null, endDate: string | null, signal: AbortSignal): Promise<unknown>;
