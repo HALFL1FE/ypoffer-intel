@@ -60,9 +60,11 @@ def main():
     expected_routes = {
         "^/api/db/status/?$": ("/api/db/index", "x-oi-db-route", "status"),
         "^/api/db/merchant/?$": ("/api/db/index", "x-oi-db-route", "merchant"),
+        "^/api/db/asin/?$": ("/api/db/index", "x-oi-db-route", "asin"),
         "^/api/db/search/?$": ("/api/db/index", "x-oi-db-route", "search"),
         "^/api/ui/db/status/?$": ("/api/db/index", "x-oi-db-route", "ui-status"),
         "^/api/ui/db/merchant/?$": ("/api/db/index", "x-oi-db-route", "ui-merchant"),
+        "^/api/ui/db/asin/?$": ("/api/db/index", "x-oi-db-route", "ui-asin"),
         "^/api/ui/db/search/?$": ("/api/db/index", "x-oi-db-route", "ui-search"),
         "^/api/ui/db/keywords/?$": ("/api/db/index", "x-oi-db-route", "ui-keywords"),
         "^/api/ui/db/offers/?$": ("/api/db/index", "x-oi-db-route", "ui-offers"),

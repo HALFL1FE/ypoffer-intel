@@ -1,6 +1,6 @@
 # Chatbot 完整档案
 
-> 更新日期：2026-09-04 · 分支：`FRONTEND-VUE-MIGRATION`
+> 更新日期：2026-09-11 · 分支：`FRONTEND-VUE-MIGRATION`
 
 > **M7 当前实现说明：** 本文中带有 Legacy、`public/app.js`、旧辅助脚本或 `frontend/src/legacy/` 的章节是迁移历史与行为来源记录，不再代表当前文件路径。生产前端现由 `frontend/src/runtime/modernApp.ts`、`frontend/src/entry.ts`、`frontend/src/features/chatbot/` 与 `frontend/src/features/agent/` 承载；认证入口仅为 `public/auth.js`。旧运行时、旧页面 DOM 和运行时回退开关已删除，回滚使用上一份可部署构建。
 
@@ -32,9 +32,11 @@ YeahPromos Offer Intelligence 内建了一个对话式 AI 助手，支持中英�
 >
 > Chat Mode 面对商户、品类、Tier、趋势和媒体等不同分析类型的内容与边界，见 [Chat Mode 不同分析类型说明](chat-mode-analysis-types.md)。
 
-> M6/M7 当前 Runtime（2026-09-04）：Chatbot Report/Chat、Deep Window 与独立 Agent 由 Vue session/页面渲染；Agent 进入页面后按需加载 `@copilotkit/vue`，通过真实 `/api/copilotkit` Runtime 和同源 `/api/chat/agui` 使用 Python registry。Node Runtime 先验证 v2 `oi_session`，再通过 `no-store` 的同源 `/api/auth/session` 探测确认当前数据库用户；Python AG-UI 也重新查询 `cnpscy_oi_user` 执行 Agent 页面权限。level=2 不允许 Agent，内部 token 只用于 Python AG-UI 调用；Python 继续拥有 8 工具 registry、参数/结果白名单、plan proof、批次、replan 与 synthesis。M7 已删除旧运行时及 parity/legacy runtime 开关；CopilotKit 不可用时停留在 Vue 页面并使用受控 modern session。
+> M6/M7 当前 Runtime（2026-09-04）：Chatbot Report/Chat、Deep Window 与独立 Agent 由 Vue session/页面渲染；Agent 进入页面后按需加载 `@copilotkit/vue`，通过真实 `/api/copilotkit` Runtime 和同源 `/api/chat/agui` 使用 Python registry。Node Runtime 先验证 v2 `oi_session`，再通过 `no-store` 的同源 `/api/auth/session` 探测确认当前数据库用户；Python AG-UI 也重新查询 `cnpscy_oi_user` 执行 Agent 页面权限。level=2 不允许 Agent，内部 token 只用于 Python AG-UI 调用；Python 继续拥有 9 工具 registry、参数/结果白名单、plan proof、批次、replan 与 synthesis。M7 已删除旧运行时及 parity/legacy runtime 开关；CopilotKit 不可用时停留在 Vue 页面并使用受控 modern session。
 
 > Agent ASIN 支持（2026-09-11）：Agent 注册表新增 `asin_analysis`，与现有 ASIN 数据接口 `/api/ui/db/asin` 对接；一次可查询最多 5 个 ASIN，返回产品/商户汇总 `rows` 与真实数据库月份明细 `monthly`。ASIN 不再按商户名解析，结果展示保留 ASIN、商户和月份维度；原始工具载荷仍不会进入结构化记忆。
+
+> Agent 上传清单与推广分析（2026-09-11）：独立 Agent 支持上传或从文件夹拖入一个 XLSX/XLS/CSV/TSV 商家清单，文件在浏览器本机解析，单文件上限 5 MiB、最多 200 个商家。确认推送日期后，新增 `promotion_analysis` 工具复用推广追踪的普通报告和关系报告，支持商家、按商家统计媒体数量、媒体、链接、品类和历史视图；文件事实与数据库事实分别标记来源，目标 ASIN 与成交 ASIN 分开显示，不把观察到的变化表述为推送因果。附件只存在当前页面会话，不写入结构化记忆或上传存储。
 
 ### M6 CopilotKit Agent 迁移边界（历史记录，2026-09-03）
 
@@ -396,9 +398,11 @@ call_llm()         → 统一调用入口 (OpenAI 兼容 / Anthropic SDK)
 call_llm_tools()   → Agent 规划调用，归一化 DeepSeek/Claude 工具结果
 ```
 
-`chat_agent_http.py` 负责 Agent 规划端点的请求大小、消息角色、工具名称和双语提示词校验；现代 Agent 工具执行在 Vue `frontend/src/features/agent/agentSession.ts` 中完成。
+`chat_agent_http.py` 负责 Agent 规划端点的请求大小、消息角色、工具名称和双语提示词校验；现代 Agent 工具执行在 Vue `frontend/src/features/agent/agentSession.ts` 中完成。上传清单摘要作为受控、不可信的 `promotionContext` 进入规划与综合上下文，完整清单不拼入用户问题。
 
 `asin_analysis` 通过同源 `/api/ui/db/asin?asins=...&months=12` 读取 ASIN 产品、商户和月份表现；Agent 只向综合模型传递受控的 `rows`、`monthly`、`notFound`、来源和时间字段，最多处理 5 个 ASIN。
+
+`promotion_analysis` 只在当前请求带有服务端校验过的 `promotionContext` 时启用。`file` 视图只读取浏览器本机标准化清单，不访问数据库；`merchants`、`categories`、`history` 复用推广追踪普通报告；`merchant_media` 按商家统计有活动的非空媒体 ID（排除 `0`）并去重；`publishers`、`links` 复用关系报告。工具执行前校验附件 ID、清单内商家范围和已确认日期，结果最多 25 行并限制为 18,000 字节；媒体总额与链接明细不相加，缺失目标 ASIN 不从成交 ASIN 推断。主 AG-UI 链路和降级 session 链路都传递同一附件快照。明确的媒体数量排名问题在无工具计划时会修复为受限的 `merchant_media` 调用。
 
 `merchant_analysis` 的 `metrics` 是当前缓存商户汇总，`monthly` 是按最新月份在前排列的真实 DB 月度数据。月度数据由 `fetchMerchantMonthlyRows()` → `fetchMerchantMetrics()` → `/api/ui/db/merchant?months=12&minimal=1` 获取，并使用 `mergeMonthIntoOffer()` 保持与 Report Mode 月份概览相同的 EPC、AOV、CVR、Commission、Orders、Clicks、DPV 和 ATC 口径；月度接口不可用时 `monthly=[]`、`monthlyDataSource="unavailable"`，不伪造月度值。综合模型若只引用最新月份，`runChatAgent()` 会从已完成的工具结果中补回完整月度表。
 
@@ -420,7 +424,7 @@ call_llm_tools()   → Agent 规划调用，归一化 DeepSeek/Claude 工具结�
 
 Agent 规划请求继续使用 64KB 请求体上限；综合请求由本地和 Vercel 两个流入口显式传入共享的 128KB 读取上限。浏览器端 `runChatAgent()` 保留完整规划结果，按每批最多 4 个工具调用执行，达到总预算 6 个后将剩余目标标记为 `partial`，并通过 `omittedTargets` 暴露给综合模型和用户。具体数据问题只有在工具结果、结构化上下文或用户提供数值至少有一项可验证时才允许无工具直答；没有来源时返回补充商户、时间范围和指标的提示。商户和过滤条件在工具执行前按 `ambiguous`、`not_found`、`invalid_filter` 失败关闭，不会把歧义解析成第一项或把非法过滤扩大成全量查询。
 
-Agent 规划入口使用 `v2` 请求协议，服务端从 `agent_tool_registry.py` 读取 `agent-tools-v1` 注册表定义；浏览器只发送 `question`、`language`、`enabledTools` 和受控 Trace。综合入口使用 `v2` 结构化请求，服务端验证 `agentRunId`、`planProofs`、`context` 和 `toolResults` 后才组装 Provider 消息。客户端提交 `messages`、工具 Schema、未知结果字段或篡改参数时拒绝请求；普通 Chat Mode 仍使用 `prompt/history`。
+Agent 规划入口使用 `v2` 请求协议，服务端从 `agent_tool_registry.py` 读取 `agent-tools-v1` 注册表定义；浏览器发送 `question`、`language`、`enabledTools`、可选的受控 `promotionContext` 和 Trace。综合入口使用 `v2` 结构化请求，服务端验证 `agentRunId`、`planProofs`、`context` 和 `toolResults` 后才组装 Provider 消息。客户端提交 `messages`、工具 Schema、未知结果字段或篡改参数时拒绝请求；普通 Chat Mode 仍使用 `prompt/history`。
 
 | 路由 | 方法 | Handler | 说明 |
 |------|------|---------|------|
@@ -601,7 +605,7 @@ public/
 ```
 llm_provider.py               ← LLM Provider 抽象（DeepSeek/Claude）
 chat_agent_http.py            ← Chat Mode Agent 规划端点、工具白名单和双语提示词
-agent_tool_registry.py        ← 八个 Agent 工具的唯一注册表、参数和结果白名单
+agent_tool_registry.py        ← 九个 Agent 工具的唯一注册表、参数和结果白名单
 agent_contract.py             ← Agent v2 请求校验、计划证明和服务端消息组装
 llm_classify.py               ← 意图分类 + 分析文字生成编排层
 server.py                     ← 本地服务器（/api/chat/* 路由）
@@ -749,7 +753,7 @@ Trace 写入是异步、短超时和可丢弃的：网络或数据库写入失�
 
 ### Agent 服务端工具注册表与 v2 协议（2026-08-27）
 
-4.2 已完成。`agent_tool_registry.py` 是七个只读工具的唯一规范来源：`merchant_analysis`、`category_analysis`、`merchant_comparison`、`tier_analysis`、`category_comparison`、`payment_status` 和 `trend`。注册表同时维护双语描述、参数 Schema、参数范围、结果字段白名单、结果来源和大小限制；浏览器只能提交 `enabledTools` 名称集合，不能提交工具描述或 Schema。
+4.2 已完成。`agent_tool_registry.py` 是九个只读工具的唯一规范来源：`merchant_analysis`、`category_analysis`、`merchant_comparison`、`tier_analysis`、`category_comparison`、`payment_status`、`trend`、`asin_analysis` 和 `promotion_analysis`。注册表同时维护双语描述、参数 Schema、参数范围、结果字段白名单、结果来源和大小限制；浏览器只能提交 `enabledTools` 名称集合，不能提交工具描述或 Schema。
 
 规划请求 `POST /api/chat/agent` 使用 `contractVersion: "v2"`，只接收问题、语言、启用工具集合和受控 Trace 元数据。服务端返回规范化的 `agentRunId`、`r{round}c{index}` 调用 ID、`registryVersion: "agent-tools-v1"` 和一次性使用的 `planProof`。工具失败时，最多进行一轮结构化重规划；重规划只提交前一轮证明、失败调用 ID 和固定错误码，不传递浏览器原始错误文本或自由消息。
 

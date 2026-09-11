@@ -6,11 +6,14 @@ import type { UiLanguage } from "../../shared/i18n";
 import AgentPage, { type AgentRunner, type AgentRunRequest } from "./AgentPage.vue";
 import CopilotKitAgentRuntime from "./CopilotKitAgentRuntime.vue";
 import type { AgentSession, AgentToolExecutionResponse, AgentToolName, AgentViewSession } from "./agentSession";
+import type { AgentAttachmentStore } from "./agentAttachment";
+import { readMerchantWorkbook } from "../../shared/import/merchantWorkbook";
 
 interface AgentToolRunSession {
   readonly language: UiLanguage;
   readonly history: AgentRunRequest["history"];
   readonly bypassPlanning: boolean;
+  readonly promotionAttachment?: AgentRunRequest["promotionAttachment"];
   direct(planningFallback?: { readonly content?: string }): ReturnType<AgentRunner>;
   execute(request: {
     readonly callId: string;
@@ -34,6 +37,8 @@ const props = defineProps<{
   readonly fallbackRun: AgentRunner;
   readonly fallbackSession?: AgentViewSession;
   readonly toolExecutor: NonNullable<AgentSession["executeTool"]>;
+  readonly attachmentStore?: AgentAttachmentStore;
+  readonly readFile?: typeof readMerchantWorkbook;
 }>();
 
 const toolNames = [
@@ -44,7 +49,8 @@ const toolNames = [
   "category_comparison",
   "payment_status",
   "trend",
-  "asin_analysis"
+  "asin_analysis",
+  "promotion_analysis"
 ] as const;
 
 let toolSession: AgentToolRunSession | undefined;
@@ -56,6 +62,7 @@ function beginRun(request: AgentRunRequest): AgentToolRunSession {
     language: request.language,
     history: request.history,
     bypassPlanning: false,
+    promotionAttachment: request.promotionAttachment,
     direct: () => props.fallbackRun(request),
     async execute(toolRequest) {
       const result = await props.toolExecutor({
@@ -63,7 +70,9 @@ function beginRun(request: AgentRunRequest): AgentToolRunSession {
         toolName: toolRequest.toolName as AgentToolName,
         arguments: toolRequest.arguments,
         prompt: request.prompt,
-        signal: toolRequest.signal || request.signal
+        signal: toolRequest.signal || request.signal,
+        language: request.language,
+        promotionAttachment: request.promotionAttachment
       });
       if (result.memoryEvent) memoryEvents.push(result.memoryEvent);
       if (result.resultView) {
@@ -89,7 +98,9 @@ function beginRun(request: AgentRunRequest): AgentToolRunSession {
       };
     },
     dispose() {
-      if (toolSession === session) toolSession = undefined;
+      if (toolSession === session) {
+        toolSession = undefined;
+      }
     }
   };
   toolSession = session;
@@ -124,7 +135,9 @@ const frontendTools = computed<VueFrontendTool[]>(() => toolNames.map((toolName)
       toolName,
       arguments: args,
       prompt: messageText(prompt?.content),
-      signal: context.signal || new AbortController().signal
+      signal: context.signal || new AbortController().signal,
+      language: props.language,
+      promotionAttachment: props.attachmentStore?.get() || undefined
     });
   }
 })));
@@ -141,7 +154,7 @@ const frontendTools = computed<VueFrontendTool[]>(() => toolNames.map((toolName)
     :enable-inspector="false"
     :debug="false"
   >
-    <CopilotKitAgentRuntime :language="language" :storage="storage" :begin-run="beginRun" />
+    <CopilotKitAgentRuntime :language="language" :storage="storage" :begin-run="beginRun" :attachment-store="attachmentStore" :read-file="readFile" />
   </CopilotKitProvider>
   <AgentPage
     v-else
@@ -149,6 +162,8 @@ const frontendTools = computed<VueFrontendTool[]>(() => toolNames.map((toolName)
     :run="fallbackRun"
     :session="fallbackSession"
     :storage="storage"
+    :attachment-store="attachmentStore"
+    :read-file="readFile"
     :auto-focus="false"
   />
 </template>

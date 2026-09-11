@@ -7,6 +7,7 @@ import "./shared/styles/page-foundations.css";
 import "./features/offer-tracker/offerTracker.css";
 import "./features/offer-performance/offerPerformance.css";
 import OfferPerformancePage from "./features/offer-performance/OfferPerformancePage.vue";
+import { loadReport as loadPromotionPerformanceReport } from "./features/offer-performance/performanceApi";
 import "./features/payments/payments.css";
 import "./features/publishers/publishers.css";
 import "./features/brand-media/brandMedia.css";
@@ -57,7 +58,7 @@ import type { RevenueFlowTrendRequest } from "./features/revenue-flow/useRevenue
 import MonthlyNewMerchantsPage, {
   type MonthlyNewMerchantFileReader
 } from "./features/monthly-new-merchants/MonthlyNewMerchantsPage.vue";
-import { parseMonthlyNewMerchantTable } from "./features/monthly-new-merchants/monthlyNewMerchantsModel";
+import { readMerchantWorkbook } from "./shared/import/merchantWorkbook";
 import type { MonthlyNewMerchantPayload } from "./features/monthly-new-merchants/monthlyNewMerchantsModel";
 import type { MonthlyNewMerchantLoadRequest } from "./features/monthly-new-merchants/useMonthlyNewMerchants";
 import TargetsPage from "./features/targets/TargetsPage.vue";
@@ -88,6 +89,7 @@ import { reportExportFilename, toExportSheets } from "./features/chatbot/report/
 import type { ReportDocument } from "./features/chatbot/report/reportContracts";
 import AgentPage, { type AgentRunResult, type AgentRunner } from "./features/agent/AgentPage.vue";
 import { createAgentSession, type AgentSession } from "./features/agent/agentSession";
+import { createAgentAttachmentStore, type AgentAttachmentStore } from "./features/agent/agentAttachment";
 import AppShell from "./shell/AppShell.vue";
 import type { AppShellController } from "./shell/appShellContracts";
 
@@ -128,6 +130,8 @@ const CopilotKitAgentHost = defineAsyncComponent({
         run: attrs.fallbackRun,
         session: attrs.fallbackSession,
         storage: attrs.storage,
+        attachmentStore: attrs.attachmentStore,
+        readFile: attrs.readFile,
         autoFocus: false
       } as never);
     }
@@ -165,26 +169,6 @@ function tierReportData(data: AppBootstrapData): TierSheetReportData {
     ...sheetReportData,
     offers: offerRecords(data)
   } as TierSheetReportData;
-}
-
-interface SpreadsheetReader {
-  readonly read: (data: ArrayBuffer, options: { readonly type: "array" }) => SpreadsheetWorkbook;
-  readonly utils: {
-    readonly sheet_to_json: (sheet: unknown, options: {
-      readonly header: 1;
-      readonly raw: false;
-      readonly defval: string;
-    }) => unknown;
-  };
-}
-
-interface SpreadsheetWorkbook {
-  readonly SheetNames: readonly string[];
-  readonly Sheets: Readonly<Record<string, unknown>>;
-}
-
-interface WindowWithSpreadsheetReader extends Window {
-  readonly XLSX?: SpreadsheetReader;
 }
 
 function chatbotRecord(data: AppBootstrapData): Record<string, unknown> {
@@ -427,45 +411,9 @@ async function addTier1Merchant(request: Tier1MerchantAddRequest): Promise<unkno
   });
 }
 
-let monthlySpreadsheetReaderPromise: Promise<SpreadsheetReader> | null = null;
-
-function loadMonthlySpreadsheetReader(): Promise<SpreadsheetReader> {
-  const existing = (window as WindowWithSpreadsheetReader).XLSX;
-  if (existing) return Promise.resolve(existing);
-  if (monthlySpreadsheetReaderPromise) return monthlySpreadsheetReaderPromise;
-  monthlySpreadsheetReaderPromise = new Promise<SpreadsheetReader>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
-    script.async = true;
-    script.onload = () => {
-      const reader = (window as WindowWithSpreadsheetReader).XLSX;
-      if (reader) resolve(reader);
-      else reject(new Error("Spreadsheet reader did not load."));
-    };
-    script.onerror = () => reject(new Error("Could not load the XLS/XLSX reader. Try CSV or paste the table instead."));
-    document.head.appendChild(script);
-  }).catch((error) => {
-    monthlySpreadsheetReaderPromise = null;
-    throw error;
-  });
-  return monthlySpreadsheetReaderPromise;
-}
-
 const readMonthlyMerchantFile: MonthlyNewMerchantFileReader = async (file) => {
-  const extension = file.name.split(".").pop()?.toLowerCase() || "";
-  if (extension === "xlsx" || extension === "xls") {
-    const reader = await loadMonthlySpreadsheetReader();
-    const workbook = reader.read(await file.arrayBuffer(), { type: "array" });
-    const firstSheetName = workbook.SheetNames[0];
-    const firstSheet = firstSheetName ? workbook.Sheets[firstSheetName] : undefined;
-    if (!firstSheet) return [];
-    const table = reader.utils.sheet_to_json(firstSheet, { header: 1, raw: false, defval: "" });
-    return Array.isArray(table) ? table.filter((row): row is unknown[] => Array.isArray(row)) : [];
-  }
-  return parseMonthlyNewMerchantTable(
-    await file.text(),
-    extension === "tsv" ? "\t" : ""
-  );
+  const tables = await readMerchantWorkbook(file);
+  return tables[0] || [];
 };
 
 function revenueFlowInitialState(element: HTMLElement): {
@@ -654,14 +602,7 @@ const offerPerformanceFactory: ModernPageFactory = (element): ModernPageControll
   const i18n = createI18nStore(getAppSnapshot().value.language);
   const app = createApp({ setup: () => () => h(OfferPerformancePage, {
     language: i18n.language.value,
-    readFile: async (file: File): Promise<unknown[][][]> => {
-      if (/\.xlsx?$/i.test(file.name)) {
-        const reader = await loadMonthlySpreadsheetReader();
-        const workbook = reader.read(await file.arrayBuffer(), { type: "array" });
-        return workbook.SheetNames.map(name => reader.utils.sheet_to_json(workbook.Sheets[name], { header: 1, raw: false, defval: "" })).filter((table): table is unknown[][] => Array.isArray(table));
-      }
-      return [parseMonthlyNewMerchantTable(await file.text(), /\.tsv$/i.test(file.name) ? "\t" : "")];
-    },
+    readFile: readMerchantWorkbook,
     download: (rows: Record<string, unknown>[]) => { downloadWorkbook("offer-promotion-comparison.xlsx", { rows, columns: objectExportColumns(rows) }); }
   }) });
   app.mount(element);
@@ -917,6 +858,7 @@ const categoryReportFactory: ModernPageFactory = (element): ModernPageController
 
 let modernChatbotSession: ChatbotSession | null = null;
 let modernAgentSession: AgentSession | null = null;
+let modernAgentAttachmentStore: AgentAttachmentStore | null = null;
 
 function downloadChatbotReport(result: ChatbotReportViewResult): boolean {
   const document = result.document || ("documentId" in result ? result as unknown as ReportDocument : null);
@@ -984,7 +926,8 @@ function agentSession(snapshot: AppBootstrapData): AgentSession {
       paymentRecords: paymentRecords(snapshot),
       language: snapshot.language,
       storage: browserStorage(),
-      agentEnabled: snapshot.agentEnabled
+      agentEnabled: snapshot.agentEnabled,
+      loadPromotionReport: loadPromotionPerformanceReport
     });
   }
   modernAgentSession.setLanguage?.(snapshot.language);
@@ -1024,6 +967,7 @@ const agentFactory: ModernPageFactory = (element): ModernPageController => {
   const snapshot = getAppSnapshot().value;
   const i18n = createI18nStore(snapshot.language);
   const session = agentSession(snapshot);
+  if (!modernAgentAttachmentStore) modernAgentAttachmentStore = createAgentAttachmentStore();
   const runtime = window.OI_COPILOTKIT_RUNTIME;
   const copilotKitEnabled = runtime?.enabled === true && runtime.authority === "python-registry";
   const fallbackSession = session;
@@ -1049,6 +993,8 @@ const agentFactory: ModernPageFactory = (element): ModernPageController => {
         fallbackSession,
         toolExecutor: session.executeTool,
         storage: browserStorage(),
+        attachmentStore: modernAgentAttachmentStore,
+        readFile: readMerchantWorkbook,
       });
     }
   });

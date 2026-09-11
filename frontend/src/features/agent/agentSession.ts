@@ -23,6 +23,12 @@ import {
   type AgentRunStatus,
   type AgentTimelineStep
 } from "./agentModel";
+import {
+  executePromotionTool,
+  type PromotionReportLoader,
+  type PromotionToolArguments,
+} from "./agentPromotionTool";
+import { promotionManifestForRequest, type AgentPromotionAttachment } from "./agentAttachment";
 
 type Row = Readonly<Record<string, unknown>>;
 type DataSource = "cache" | "database" | "mixed" | "unavailable" | "unknown";
@@ -34,7 +40,8 @@ export type AgentToolName =
   | "category_comparison"
   | "payment_status"
   | "trend"
-  | "asin_analysis";
+  | "asin_analysis"
+  | "promotion_analysis";
 
 type ToolName = AgentToolName;
 
@@ -46,7 +53,8 @@ export const AGENT_TOOL_NAMES: readonly ToolName[] = [
   "category_comparison",
   "payment_status",
   "trend",
-  "asin_analysis"
+  "asin_analysis",
+  "promotion_analysis"
 ];
 
 export interface AgentHistoryMessage {
@@ -60,6 +68,7 @@ export interface AgentSessionRequest {
   readonly history: readonly AgentHistoryMessage[];
   readonly memoryText: string;
   readonly signal: AbortSignal;
+  readonly promotionAttachment?: AgentPromotionAttachment;
 }
 
 export interface AgentSessionCallbacks {
@@ -75,6 +84,8 @@ export interface AgentToolExecutionRequest {
   readonly arguments: Record<string, unknown>;
   readonly prompt: string;
   readonly signal: AbortSignal;
+  readonly language?: UiLanguage;
+  readonly promotionAttachment?: AgentPromotionAttachment;
 }
 
 export interface AgentToolExecutionResponse {
@@ -152,6 +163,7 @@ export interface AgentSessionOptions {
   readonly enableQuestionLogging?: boolean;
   readonly enableTrace?: boolean;
   readonly dataAsOf?: string | null;
+  readonly loadPromotionReport?: PromotionReportLoader;
 }
 
 interface AgentToolCall {
@@ -177,6 +189,7 @@ interface AgentToolResult {
   readonly data?: Record<string, unknown>;
   readonly errorCode?: "tool_error" | "tool_timeout" | "llm_timeout" | "invalid_arguments" | "invalid_filter" | "not_found" | "stopped_by_user";
   readonly resolution?: Record<string, unknown>;
+  readonly resultView?: AgentResultView;
 }
 
 interface AgentToolExecution {
@@ -222,6 +235,18 @@ const ENABLED_ERROR_CODES = new Set([
   "invalid_filter",
   "not_found",
   "stopped_by_user"
+]);
+const KNOWN_ERROR_CODES = new Set([
+  ...ENABLED_ERROR_CODES,
+  "agent_planning_unavailable",
+  "network_error",
+  "provider_error",
+]);
+const INITIAL_PLANNING_RETRYABLE_ERROR_CODES = new Set([
+  "agent_planning_unavailable",
+  "network_error",
+  "provider_error",
+  "llm_timeout",
 ]);
 const ASIN_PATTERN = /^B[0-9A-Z]{9}$/i;
 const MAX_ASINS_PER_QUERY = 5;
@@ -444,7 +469,7 @@ function failure(
 
 function safeErrorCode(value: unknown): string {
   const code = text(value, 64).toLowerCase();
-  return ENABLED_ERROR_CODES.has(code) ? code : "tool_error";
+  return KNOWN_ERROR_CODES.has(code) ? code : "tool_error";
 }
 
 function randomUuid(): string {
@@ -668,6 +693,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
   const paymentRecords = (options.paymentRecords || []).slice();
   const storage = options.storage;
   const fetcher = options.fetcher || ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
+  const loadPromotionReport = options.loadPromotionReport;
   const listeners = new Set<(state: AgentSessionState) => void>();
   let currentLanguage: UiLanguage = options.language;
   let status: AgentRunStatus = "idle";
@@ -906,14 +932,23 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     return question.completionPromise;
   }
 
-  function buildPlanningBody(question: string, language: UiLanguage, trace: TraceContext, retry?: Record<string, unknown>): Record<string, unknown> {
+  function buildPlanningBody(
+    question: string,
+    language: UiLanguage,
+    trace: TraceContext,
+    promotionAttachment?: AgentPromotionAttachment,
+    retry?: Record<string, unknown>,
+  ): Record<string, unknown> {
     const body: Record<string, unknown> = {
       contractVersion: "v2",
       question: text(question, 4_000),
       language,
-      enabledTools: [...AGENT_TOOL_NAMES],
+      enabledTools: AGENT_TOOL_NAMES.filter((name) => promotionAttachment || name !== "promotion_analysis"),
       trace: { runId: trace.runId, questionEventId: trace.questionEventId, tracePhase: "planning" }
     };
+    if (promotionAttachment) {
+      body.promotionContext = promotionManifestForRequest(promotionAttachment);
+    }
     if (retry) body.retry = retry;
     return body;
   }
@@ -944,13 +979,14 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     language: UiLanguage,
     trace: TraceContext,
     signal: AbortSignal,
+    promotionAttachment?: AgentPromotionAttachment,
     retry?: Record<string, unknown>
   ): Promise<{ readonly plan?: AgentPlan; readonly errorCode?: string }> {
     try {
       const payload = await requestJson<JsonPayload>("/api/chat/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify(buildPlanningBody(question, language, trace, retry))
+        body: JSON.stringify(buildPlanningBody(question, language, trace, promotionAttachment, retry))
       }, signal);
       const parsed = parsePlan(payload);
       if (!parsed) return { errorCode: safeErrorCode(payload.errorCode || "agent_planning_unavailable") };
@@ -1270,7 +1306,12 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     }, dataSource, dataAsOf, estimated);
   }
 
-  async function executeTool(call: AgentToolCall, prompt: string, signal: AbortSignal): Promise<AgentToolResult> {
+  async function executeTool(
+    call: AgentToolCall,
+    prompt: string,
+    signal: AbortSignal,
+    promotionAttachment?: AgentPromotionAttachment,
+  ): Promise<AgentToolResult> {
     try {
       if (call.name === "merchant_analysis") return executeMerchantAnalysis(call.arguments, signal);
       if (call.name === "category_analysis") return executeCategoryAnalysis(call.arguments);
@@ -1279,6 +1320,19 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       if (call.name === "category_comparison") return executeCategoryComparison(call.arguments);
       if (call.name === "payment_status") return executePaymentStatus(call.arguments, prompt);
       if (call.name === "asin_analysis") return executeAsinAnalysis(call.arguments, signal);
+      if (call.name === "promotion_analysis") {
+        if (!promotionAttachment) return failure("invalid_arguments", "unavailable", { status: "invalid_filter", field: "attachment" });
+        if (!loadPromotionReport) return failure("tool_error", "unavailable", { status: "unavailable", field: "promotion_report" });
+        const execution = await executePromotionTool(
+          promotionAttachment,
+          call.arguments as unknown as PromotionToolArguments,
+          loadPromotionReport,
+          signal,
+          currentLanguage,
+          call.id,
+        );
+        return { ...execution.result, ...(execution.resultView ? { resultView: execution.resultView } : {}) };
+      }
       return executeTrend(call.arguments, signal);
     } catch (error) {
       if (isAbortError(error, signal)) throw error;
@@ -1294,6 +1348,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     if (call.name === "merchant_comparison") return Array.isArray(args.merchants) ? args.merchants.map((item) => text(item, 80)).join(", ") : call.name;
     if (call.name === "category_comparison") return Array.isArray(args.categories) ? args.categories.map((item) => text(item, 120)).join(", ") : call.name;
     if (call.name === "asin_analysis") return Array.isArray(args.asins) ? args.asins.map((item) => text(item, 20).toUpperCase()).join(", ") : call.name;
+    if (call.name === "promotion_analysis") return text(args.view, 40) || call.name;
     return [args.merchant, args.month, args.status, args.tier].map((item) => text(item, 80)).filter(Boolean).join(" / ") || call.name;
   }
 
@@ -1321,7 +1376,8 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     calls: readonly AgentToolCall[],
     prompt: string,
     signal: AbortSignal,
-    trace: TraceContext
+    trace: TraceContext,
+    promotionAttachment?: AgentPromotionAttachment,
   ): Promise<AgentToolExecution[]> {
     const started = new Map<string, number>();
     calls.forEach((call) => {
@@ -1329,13 +1385,13 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       emitStep(makeStep("tool-" + call.id, "tool", "running", stepLabel("tool", toolTarget(call)), started.get(call.id)!));
     });
     const results = await Promise.all(calls.map(async (call) => {
-      const result = await executeTool(call, prompt, signal);
+      const result = await executeTool(call, prompt, signal, promotionAttachment);
       const stepStatus: AgentTimelineStep["status"] = result.ok ? "done" : result.errorCode === "tool_timeout" ? "timeout" : "error";
       const step = makeStep("tool-" + call.id, "tool", stepStatus, stepLabel("tool", toolTarget(call)), started.get(call.id) || Date.now(), result);
       emitStep(step);
       appendTraceStep(trace, step, steps.findIndex((item) => item.id === step.id) + 1);
       const execution = { call, result };
-      const view = resultViewFromExecution(execution);
+      const view = result.resultView || resultViewFromExecution(execution);
       if (view) emitResultView(view);
       return execution;
     }));
@@ -1452,10 +1508,10 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     };
     const execution: AgentToolExecution = {
       call,
-      result: await executeTool(call, text(request.prompt, 20_000), request.signal)
+      result: await executeTool(call, text(request.prompt, 20_000), request.signal, request.promotionAttachment)
     };
     const nextMemoryEvent = memoryEvent(execution, request.prompt, false);
-    const resultView = resultViewFromExecution(execution);
+    const resultView = execution.result.resultView || resultViewFromExecution(execution);
     return {
       toolResult: projectedToolResult(execution),
       ...(nextMemoryEvent ? { memoryEvent: nextMemoryEvent } : {}),
@@ -1720,7 +1776,13 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     try {
       const planningId = "planning";
       emitStep(makeStep(planningId, "planning", "running", stepLabel("planning", ""), started));
-      const firstPlan = await plan(prompt, currentLanguage, trace, combined.signal);
+      let firstPlan = await plan(prompt, currentLanguage, trace, combined.signal, request.promotionAttachment);
+      if (!firstPlan.plan && INITIAL_PLANNING_RETRYABLE_ERROR_CODES.has(firstPlan.errorCode || "") && !combined.signal.aborted) {
+        const retryStarted = Date.now();
+        emitStep(makeStep("planning-retry", "planning", "running", stepLabel("planning", ""), retryStarted));
+        firstPlan = await plan(prompt, currentLanguage, trace, combined.signal, request.promotionAttachment);
+        emitStep(makeStep("planning-retry", "planning", firstPlan.plan ? "done" : "error", stepLabel("planning", ""), retryStarted));
+      }
       if (!firstPlan.plan) {
         const planningStep = makeStep(planningId, "planning", "error", stepLabel("planning", ""), started);
         emitStep(planningStep);
@@ -1760,7 +1822,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       let allExecutions: AgentToolExecution[] = [];
       const omitted: string[] = activePlan.toolCalls.slice(MAX_TOOL_CALLS).map(toolTarget);
       let firstCalls = activePlan.toolCalls.slice(0, MAX_TOOL_CALLS);
-      allExecutions = await executeCalls(firstCalls, prompt, combined.signal, trace);
+      allExecutions = await executeCalls(firstCalls, prompt, combined.signal, trace, request.promotionAttachment);
       executedCount += allExecutions.length;
       failedCount += allExecutions.filter((item) => !item.result.ok).length;
       const proofs: string[] = activePlan.planProof ? [activePlan.planProof] : [];
@@ -1772,7 +1834,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
           previousPlanProof: activePlan.planProof,
           failedCalls: failedCalls.map((item) => ({ callId: item.call.id, errorCode: item.result.errorCode || "tool_error" }))
         };
-        const retryPlanResult = await plan(prompt, currentLanguage, trace, combined.signal, retryBody);
+        const retryPlanResult = await plan(prompt, currentLanguage, trace, combined.signal, request.promotionAttachment, retryBody);
         if (retryPlanResult.plan) {
           const retryPlan = retryPlanResult.plan;
           if (retryPlan.planProof) proofs.push(retryPlan.planProof);
@@ -1781,7 +1843,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
           const retryCalls = retryPlan.toolCalls.slice(0, remaining);
           omitted.push(...retryPlan.toolCalls.slice(remaining).map(toolTarget));
           if (retryCalls.length) {
-            const retryExecutions = await executeCalls(retryCalls, prompt, combined.signal, trace);
+            const retryExecutions = await executeCalls(retryCalls, prompt, combined.signal, trace, request.promotionAttachment);
             allExecutions = [...allExecutions, ...retryExecutions];
             executedCount += retryExecutions.length;
             failedCount += retryExecutions.filter((item) => !item.result.ok).length;
@@ -1799,7 +1861,13 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
         planProofs: proofs.slice(0, MAX_PLAN_PROOFS),
         question: text(prompt, 4_000),
         language: currentLanguage,
-        context: { memory: text(request.memoryText, MAX_MEMORY_TEXT), history: clipHistory(baseHistory) },
+        context: {
+          memory: text(request.memoryText, MAX_MEMORY_TEXT),
+          history: clipHistory(baseHistory),
+          ...(request.promotionAttachment ? {
+            promotionContext: promotionManifestForRequest(request.promotionAttachment)
+          } : {})
+        },
         toolResults: allExecutions.map(projectedToolResult),
         trace: { runId: trace.runId, questionEventId: trace.questionEventId, tracePhase: "synthesis" }
       };

@@ -8,6 +8,8 @@ import { normalizeAgentResultView, normalizeAgentResultViews } from "../../share
 import type { AgentMemoryEvent, AgentTimelineStep } from "./agentModel";
 import { normalizeAgentTimelineStep } from "./agentModel";
 import AgentPage, { type AgentRunRequest, type AgentRunResult, type AgentRunner } from "./AgentPage.vue";
+import { promotionManifestForRequest, type AgentAttachmentStore } from "./agentAttachment";
+import { readMerchantWorkbook } from "../../shared/import/merchantWorkbook";
 
 interface AgentToolRunSession {
   readonly language: UiLanguage;
@@ -32,6 +34,8 @@ const props = defineProps<{
   readonly language: UiLanguage;
   readonly storage?: Storage;
   readonly beginRun: (request: AgentRunRequest) => AgentToolRunSession;
+  readonly attachmentStore?: AgentAttachmentStore;
+  readonly readFile?: typeof readMerchantWorkbook;
 }>();
 
 const { agent } = useAgent({ agentId: "default", throttleMs: 40 });
@@ -100,7 +104,8 @@ const run: AgentRunner = async (request: AgentRunRequest): Promise<AgentRunResul
       language: session.language,
       memory: text(request.memoryText, 8000),
       history: session.history,
-      behaviorParity: true
+      legacyParity: true,
+      promotionContext: request.promotionAttachment ? promotionManifestForRequest(request.promotionAttachment) : null
     }
   });
 
@@ -216,5 +221,5 @@ const run: AgentRunner = async (request: AgentRunRequest): Promise<AgentRunResul
 </script>
 
 <template>
-  <AgentPage :language="language" :run="run" :storage="storage" :auto-focus="false" />
+  <AgentPage :language="language" :run="run" :storage="storage" :auto-focus="false" :attachment-store="attachmentStore" :read-file="readFile" />
 </template>

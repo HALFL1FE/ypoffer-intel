@@ -43,6 +43,36 @@ describe("AgentPage", () => {
     wrapper.unmount();
   });
 
+  it("shows the new promotion tracking example with a new badge", async () => {
+    const wrapper = mount(AgentPage, {
+      props: { language: "zh", run: vi.fn(), autoFocus: false }
+    });
+
+    const promotionSuggestion = wrapper.get('[data-agent-example="promotion-tracking"]');
+    expect(promotionSuggestion.text()).toContain("推广追踪");
+    expect(promotionSuggestion.get('[data-agent-badge="new"]').text()).toBe("new");
+
+    await promotionSuggestion.trigger("click");
+    expect((wrapper.get('[data-agent-input]').element as HTMLTextAreaElement).value).toContain("按商家统计媒体数量");
+    wrapper.unmount();
+  });
+
+  it("separates suggestion metadata from copy in the bento card layout", () => {
+    const wrapper = mount(AgentPage, {
+      props: { language: "en", run: vi.fn(), autoFocus: false }
+    });
+
+    const cards = wrapper.findAll(".aw-suggestion");
+    expect(cards).toHaveLength(6);
+    cards.forEach((card) => {
+      expect(card.find(".aw-suggestion-meta").exists()).toBe(true);
+      expect(card.find(".aw-suggestion-meta .aw-suggestion-number").exists()).toBe(true);
+      expect(card.find(".aw-suggestion-meta .aw-suggestion-arrow").exists()).toBe(true);
+      expect(card.find(".aw-suggestion-copy").exists()).toBe(true);
+    });
+    wrapper.unmount();
+  });
+
   it("filters all slash commands, keeps IME Enter safe, and runs the selected command", async () => {
     const run = vi.fn<AgentRunner>().mockResolvedValue({ ok: true, status: "done", response: "Answer", steps: [] });
     const wrapper = mount(AgentPage, { props: { language: "en", run, autoFocus: false } });
@@ -125,6 +155,32 @@ describe("AgentPage", () => {
     await wrapper.get('[data-agent-log]').trigger('scroll');
     expect(wrapper.get('[data-agent-composer]').classes()).not.toContain('aw-composer-collapsed');
     expect((wrapper.get('[data-agent-input]').element as HTMLTextAreaElement).value).toBe('Draft question');
+    wrapper.unmount();
+  });
+
+  it("keeps the composer visible while a response is generating", async () => {
+    let release: (() => void) | undefined;
+    const run: AgentRunner = vi.fn(() => new Promise<AgentRunResult>((resolve) => {
+      release = () => resolve({ ok: true, status: "done", response: "Answer", steps: [] });
+    }));
+    const wrapper = mount(AgentPage, { props: { language: "en", run, autoFocus: false } });
+
+    await wrapper.get('[data-agent-input]').setValue("Show Tapo");
+    void wrapper.get('[data-agent-form]').trigger("submit");
+    await nextTick();
+
+    const log = wrapper.get('[data-agent-log]').element;
+    Object.defineProperties(log, {
+      scrollHeight: { value: 2000, configurable: true },
+      clientHeight: { value: 500, configurable: true },
+      scrollTop: { value: 120, writable: true, configurable: true }
+    });
+    await wrapper.get('[data-agent-log]').trigger("scroll");
+
+    expect(wrapper.get('[data-agent-composer]').classes()).not.toContain('aw-composer-collapsed');
+
+    release?.();
+    await flushPromises();
     wrapper.unmount();
   });
 
