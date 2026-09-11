@@ -657,6 +657,16 @@
   border: 1px dashed var(--pp-blue);
   border-radius: 12px;
   background: var(--pp-soft);
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+.promotion-file-choice.is-dragging {
+  border-style: solid;
+  border-color: var(--pp-blue);
+  background: var(--pp-panel);
+  box-shadow: 0 0 0 3px #3164ff2e;
 }
 .promotion-file-choice > svg {
   width: 32px;
