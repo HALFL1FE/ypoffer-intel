@@ -46,6 +46,7 @@
 
 - 按实际记录中的 `user_id` / `publisher_id` / `media_id` 分组，媒体名称表先按 ID 聚合，不通过重复维度行放大指标。
 - 只有明确的 `promoted_asin` / `target_asin` / `link_asin` 或记录级目标 URL 才认定为推广 ASIN。
+- 记录级 `link_type=product` 可以认定为单品链接，但如果没有目标 ASIN，只显示单品链接证据，不填充推广 ASIN 或单品清单范围。
 - Storefront 需要记录中的链接类型或 `/stores/`、`/shop/` 路径证据。
 - 订单表中的普通 ASIN 作为 **成交 ASIN** 单独列出；它不能证明媒体推广了该 ASIN。链接证据缺失时显示未识别，不从商家主页推断。
 - ASIN 层无法关联的点击和营收不会分摊给具体商品。明细中无证据对应的指标保持 `null`。

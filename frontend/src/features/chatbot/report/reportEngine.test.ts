@@ -72,6 +72,72 @@ describe("reportEngine actions", () => {
     expect(document.blocks.some((block) => block.id === "asin-unmatched")).toBe(false);
   });
 
+  it("ASIN 查询加载 ASIN 级月度详情并使用产品字段", async () => {
+    const offers = [{
+      ...parityOffers[0],
+      merchantId: "1001",
+      merchantName: "Alpha Audio",
+      productAsins: ["B000000001"],
+      clicks: 999,
+      orders: 99,
+      salesAmount: 9999,
+      affCommission: 999
+    }];
+    const loadAsin = vi.fn(async () => ({
+      rows: [{
+        asin: "B000000001",
+        merchantId: "1001",
+        merchantName: "Alpha Audio",
+        productName: "Alpha headphones",
+        productUrl: "https://example.com/alpha",
+        dealPrice: 79.99,
+        originalPrice: 99.99,
+        discountPercent: 20,
+        clicks: 20,
+        orders: 2,
+        salesAmount: 160,
+        affCommission: 16,
+        monthly: [{
+          month: "2026-08",
+          clicks: 20,
+          orders: 2,
+          salesAmount: 160,
+          affCommission: 16,
+          dpv: 40,
+          atc: 8
+        }]
+      }]
+    }));
+    const provider = {
+      ...createReportDataProvider({ offers }),
+      asin: loadAsin
+    };
+    const base: ReportEngineContext = {
+      offers,
+      paymentRecords: [],
+      productKeywords: {},
+      provider,
+      now: () => new Date("2026-09-08T00:00:00Z")
+    };
+    const query = resolveReportQuery("/asin: B000000001", { language: "zh", categories: [] });
+    const document = await executeReport(query, base, new AbortController().signal);
+
+    expect(loadAsin).toHaveBeenCalledWith(["B000000001"], expect.any(Number), expect.any(AbortSignal));
+    expect(document.rows).toHaveLength(1);
+    expect(document.rows[0]).toMatchObject({
+      asin: "B000000001",
+      productName: "Alpha headphones",
+      clicks: 20,
+      orders: 2,
+      salesAmount: 160
+    });
+    const monthly = document.blocks.find((block) => block.id === "asin-monthly");
+    expect(monthly && monthly.kind !== "notice" ? monthly.rows : []).toEqual(expect.arrayContaining([
+      expect.objectContaining({ month: "2026-08", clicks: 20, orders: 2 })
+    ]));
+    expect(document.message).not.toContain("ASIN 级表现不可用");
+  });
+
   it("通过统一入口执行趋势，并让列动作同步报告工作表", async () => {
     const base = context();
     const query = resolveReportQuery("Alpha Audio 近 3 个月趋势", { language: "zh", categories: [] });

@@ -106,6 +106,59 @@ describe("ChatbotPage", () => {
     expect(wrapper.find('[data-chatbot-action="clear"]').exists()).toBe(false);
   });
 
+  it("在页面顶部保留旧版快捷提问气泡并直接提交", async () => {
+    let state: ChatbotViewState = {
+      mode: "report",
+      language: "en",
+      hasMemory: false,
+      source: "cache",
+      status: "idle",
+      history: [],
+      messages: [],
+      memory: [],
+      currentResult: null
+    };
+    const submit = vi.fn(async (prompt: string): Promise<ChatbotSessionResult> => ({
+      ok: true,
+      status: "success",
+      mode: "report",
+      source: "cache",
+      intent: "merchant",
+      response: `${prompt} report`
+    }));
+    const session = {
+      getState: () => state,
+      setMode: vi.fn(),
+      submit,
+      removeMemory: vi.fn(),
+      clearConversation: vi.fn(),
+      onChange: vi.fn(() => () => undefined)
+    };
+    const wrapper = mount(ChatbotPage, {
+      props: { language: "en", offers, session, autoFocus: false }
+    });
+
+    const prompts = wrapper.findAll("[data-chatbot-quick-prompt]");
+    expect(prompts).toHaveLength(6);
+    expect(prompts.map((prompt) => prompt.text())).toEqual([
+      "Aiper",
+      "Recommend 5 beauty offers",
+      "Tier 2",
+      "Which offers are unpaid?",
+      "April unpaid payments",
+      "Find ASIN B0D2HKCMBP"
+    ]);
+    expect(wrapper.find("[data-chatbot-quick-prompts]").element.compareDocumentPosition(
+      wrapper.get('[data-chatbot-mode="report"]').element
+    ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await prompts[0]!.trigger("click");
+    await flushPromises();
+    expect(submit).toHaveBeenCalledWith("Aiper", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    state = { ...state, status: "success" };
+    wrapper.unmount();
+  });
+
   it("reuses the Legacy Chatbot two-panel shell for both modes", async () => {
     const wrapper = mount(ChatbotPage, {
       props: { language: "zh", offers, autoFocus: false }

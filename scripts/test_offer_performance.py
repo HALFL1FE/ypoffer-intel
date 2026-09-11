@@ -52,6 +52,12 @@ class PromotionTests(unittest.TestCase):
         for row, expected in [({"purchasedAsin": "B012345678"}, ("unknown", "")), ({"target_url": "https://amazon.com/dp/B012345678?tag=x"}, ("asin", "B012345678")), ({"target_url": "https://amazon.com/stores/Example"}, ("storefront", "")), ({"link_type": "storefront"}, ("storefront", "")), ({"target_asin": "b012345678"}, ("asin", "B012345678")), ({"target_url": "https://amazon.com"}, ("unknown", ""))]:
             self.assertEqual(p.target_identity(row), expected)
 
+    def test_product_link_type_is_distinct_from_purchased_asin(self):
+        self.assertEqual(
+            p.target_identity({"link_type": "product", "purchasedAsin": "B012345678"}),
+            ("product", ""),
+        )
+
     def test_detail_never_allocates_unattributed_clicks_to_asins(self):
         rows = [self.row("20260907", publisherId="7", revenue=100, orders=3, purchasedAsin="B012345678"), self.row("20260907", publisherId="7", clicks=80, target_asin="B098765432"), self.row("20260907", publisherId="8", clicks=20, link_type="storefront"), self.row("20260801", publisherId="7", revenue=999)]
         media, links = p.summarize_details(rows, self.window, self.supported, "2026-09-08")

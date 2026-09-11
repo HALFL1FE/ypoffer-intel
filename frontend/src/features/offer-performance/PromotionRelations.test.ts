@@ -130,6 +130,29 @@ describe("visible merchant and product relationships", () => {
     expect(w.findAll(".promotion-relation-path")).toHaveLength(1);
     expect(w.get(".promotion-relation-path").text()).toContain("Second Home");
   });
+  it("shows a product link as a product without treating its purchase ASIN as the target", async () => {
+    const w = page({
+      report: {
+        ...report,
+        links: [
+          ...report.links!,
+          {
+            ...edge("101", 60),
+            linkType: "product",
+            purchasedAsin: "B098765432",
+          },
+        ],
+      },
+    });
+    await w.findAll(".promotion-relation-modes button")[1]!.trigger("click");
+    const productPath = w
+      .findAll(".promotion-relation-path")
+      .find((node) => node.text().includes("单品链接 · 未提供 ASIN"));
+    expect(productPath).toBeDefined();
+    expect(productPath!.find('[data-link-kind="asin"]').exists()).toBe(true);
+    expect(productPath!.text()).toContain("成交 B098765432");
+    expect(productPath!.text()).not.toContain("成交 ASIN · 推广链接未知");
+  });
   it("queries a specific merchant when selected and keeps failed loads distinct from empty activity", async () => {
     const w = page({ error: true, report: null });
     expect(w.get('[role="alert"]').text()).toContain("关系数据暂不可用");

@@ -4,7 +4,7 @@ import type { ChatbotReportSummary } from "../chatbotReportModel";
 import type { ChatbotDataSource, ChatbotReportViewResult } from "../chatbotViewTypes";
 import { mergeChatbotKeywords } from "../chatbotKeywords";
 import { buildAnalysisReport, analysisText } from "./analysisReports";
-import { buildEntityReport, matchesCategory, normalizeOfferRow, rowMerchantId, rowMerchantName, rowTier } from "./entityReports";
+import { buildEntityReport, matchesCategory, normalizeOfferRow, rowAsins, rowMerchantId, rowMerchantName, rowTier } from "./entityReports";
 import { buildPaymentReport, paymentReportColumns } from "./paymentReports";
 import { buildPublisherProfileReport, buildPublisherRecordsReport } from "./publisherReports";
 import { buildRecommendationReport } from "./recommendationReports";
@@ -80,6 +80,65 @@ function merchantRowsFromPayload(payload: unknown, merchantId: string): readonly
     monthlyAggregateMetrics: aggregateMonths,
     monthly: merged[0]?.monthly || []
   }];
+}
+
+function asinRowsFromPayload(payload: unknown): readonly ReportRow[] {
+  return reportRowsFromPayload(payload);
+}
+
+function asinValue(row: ReportRow): string {
+  const source = row as Readonly<Record<string, unknown>>;
+  return text(
+    source.asin
+      || source.matchedAsin
+      || (Array.isArray(source.matchedAsins) ? source.matchedAsins[0] : source.matchedAsins)
+      || source.productAsin
+  ).toUpperCase();
+}
+
+function mergeAsinDetails(base: readonly ReportRow[], details: readonly ReportRow[]): readonly ReportRow[] {
+  const normalizedBase = base.map(normalizeOfferRow);
+  const merchantScopeByAsin = new Map<string, Set<string>>();
+  normalizedBase.forEach((candidate) => {
+    const source = candidate as Readonly<Record<string, unknown>>;
+    const merchantId = rowMerchantId(source);
+    if (!merchantId) return;
+    rowAsins(source).forEach((asin) => {
+      const scope = merchantScopeByAsin.get(asin) || new Set<string>();
+      scope.add(merchantId);
+      merchantScopeByAsin.set(asin, scope);
+    });
+  });
+  return details.flatMap((detail) => {
+    const asin = asinValue(detail);
+    const merchantId = rowMerchantId(detail as Readonly<Record<string, unknown>>);
+    const merchantScope = merchantScopeByAsin.get(asin);
+    if (merchantScope?.size && merchantId && !merchantScope.has(merchantId)) return [];
+    const fallback = normalizedBase.find((candidate) => {
+      const candidateSource = candidate as Readonly<Record<string, unknown>>;
+      return rowMerchantId(candidateSource) === merchantId && rowAsins(candidateSource).includes(asin);
+    });
+    return {
+      ...(fallback || {}),
+      ...detail,
+      ...(asin ? { asin, matchedAsins: [asin] } : {})
+    };
+  });
+}
+
+function asinMonthlyRowsFromRows(rows: readonly ReportRow[]): readonly ReportRow[] {
+  return rows.flatMap((row) => {
+    const source = row as Readonly<Record<string, unknown>>;
+    const asin = asinValue(row);
+    const merchantId = rowMerchantId(source);
+    const merchantName = rowMerchantName(source);
+    return recordList(source.monthly || source.asinMonthlyMetrics).map((month) => ({
+      ...month,
+      ...(asin ? { asin } : {}),
+      ...(merchantId ? { merchantId } : {}),
+      ...(merchantName ? { merchantName } : {})
+    }));
+  });
 }
 
 function merchantIdForQuery(query: ReportQuery, offers: readonly ReportRow[]): string {
@@ -432,6 +491,14 @@ function monthlyColumns(language: UiLanguage): readonly ReportColumn[] {
   ];
 }
 
+function asinMonthlyColumns(language: UiLanguage): readonly ReportColumn[] {
+  return [
+    { key: "asin", label: "ASIN", format: "text" },
+    { key: "merchantName", label: language === "zh" ? "商户" : "Merchant", format: "text" },
+    ...monthlyColumns(language)
+  ];
+}
+
 function paymentSummaryRow(summary: Readonly<Record<string, unknown>>): ReportRow {
   return {
     offerCount: summary.recordCount || 0,
@@ -510,6 +577,27 @@ export async function runReportEngine(options: ReportEngineRunOptions): Promise<
     } catch (error) {
       if (isRecord(error) && error.name === "AbortError") throw error;
       // DB 补充失败时继续使用本地快照，并在来源中保留 cache。
+    }
+  }
+  if (query.intent === "asin" && options.provider.asin && query.asins.length) {
+    const loadAsin = options.provider.asin;
+    try {
+      const payload = await loadAsin(query.asins, query.months || 12, signal);
+      abortIfNeeded(signal);
+      const details = asinRowsFromPayload(payload);
+      if (details.length) {
+        const merged = mergeAsinDetails(offers, details);
+        if (merged.length) offers = merged;
+        const detailSource = sourceSnapshot(options.provider);
+        source = {
+          ...source,
+          kind: "db",
+          asOf: detailSource.asOf || source.asOf
+        };
+      }
+    } catch (error) {
+      if (isRecord(error) && error.name === "AbortError") throw error;
+      // ASIN 详情失败时保留已有商户快照，报告仍可降级展示关联商户。
     }
   }
   if (query.intent === "analysis" && query.analysisType === "trend" && (query.categories.length || query.tiers.length) && !query.merchantIds.length) {
@@ -711,6 +799,10 @@ export async function runReportEngine(options: ReportEngineRunOptions): Promise<
       blocks.push(noticeBlock("asin-unmatched", language === "zh" ? "未匹配 ASIN" : "Unmatched ASINs", language === "zh"
         ? `以下 ASIN 未在当前数据中找到：${unmatched.join("、")}`
         : `These ASINs were not found in the current data: ${unmatched.join(", ")}`));
+    }
+    if (query.intent === "asin") {
+      const monthly = asinMonthlyRowsFromRows(rows);
+      if (monthly.length) blocks.push(tableBlock("asin-monthly", language === "zh" ? "ASIN 月度指标" : "ASIN monthly metrics", monthly, asinMonthlyColumns(language)));
     }
     if (query.intent === "merchant") {
       const monthly = merchantMonthlyRowsFromOffers(rows);

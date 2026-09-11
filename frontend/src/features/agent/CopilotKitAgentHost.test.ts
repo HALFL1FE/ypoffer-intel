@@ -12,6 +12,8 @@ describe("CopilotKit local result projection", () => {
     const toolResult = { callId: "r1c1", result: { ok: true } };
     const toolExecutor = vi.fn(async (): Promise<AgentToolExecutionResponse> => ({ toolResult, resultView: { id: "trend-1", toolName: "trend", kind: "table", status: "done", title: "Trend", source: "cache", dataAsOf: null, estimated: false, partial: false, metrics: [], columns: [], rows: [], message: "" }, memoryEvent: { kind: "tool_success" } }));
     const wrapper = mount(CopilotKitAgentHost, { props: { language: "en", endpoint: "/api/copilotkit", enabled: true, fallbackRun: vi.fn(), toolExecutor } });
+    const toolNames = wrapper.findComponent({ name: "Provider" }).props("frontendTools").map((tool: { name: string }) => tool.name);
+    expect(toolNames).toContain("asin_analysis");
     wrapper.findComponent({ name: "Runtime" }).props("beginRun")({
       prompt: "Show a trend",
       language: "en",

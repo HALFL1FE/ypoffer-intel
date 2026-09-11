@@ -91,20 +91,38 @@ const deepWindowsState = ref<DeepWindowViewState>(deepWindowController.getState(
 let stopDeepWindowSubscription: (() => void) | null = null;
 let idCounter = 0;
 const MAX_REPORT_HISTORY = 50;
+const QUICK_PROMPT_DEFINITIONS = [
+  { id: "aiper", prompt: "Aiper", zh: "Aiper", en: "Aiper" },
+  { id: "beauty", prompt: "Recommend 5 beauty offers", zh: "推荐 5 个美妆 offer", en: "Recommend 5 beauty offers" },
+  { id: "tier2", prompt: "Tier 2", zh: "Tier 2", en: "Tier 2" },
+  { id: "unpaid", prompt: "Which offers are unpaid?", zh: "哪些 offer 未付款？", en: "Which offers are unpaid?" },
+  { id: "april", prompt: "April unpaid payments", zh: "四月未付款", en: "April unpaid payments" },
+  { id: "asin", prompt: "Find ASIN B0D2HKCMBP", zh: "查找 ASIN B0D2HKCMBP", en: "Find ASIN B0D2HKCMBP" }
+] as const;
 
 const copy = computed(() => props.language === "zh" ? {
   title: "Chatbot",
   subtitle: "用 Report Mode 查数据，用 Chat Mode 继续追问。",
+  quickKicker: "QUICK START",
+  quickTitle: "示例提问",
   report: "报告模式",
   chat: "聊天模式",
   reportError: "报告暂时无法生成，请重试。"
 } : {
   title: "Chatbot",
   subtitle: "Use Report Mode for data, then continue in Chat Mode.",
+  quickKicker: "QUICK START",
+  quickTitle: "Try a question",
   report: "Report Mode",
   chat: "Chat Mode",
   reportError: "The report is temporarily unavailable. Try again."
 });
+
+const quickPrompts = computed(() => QUICK_PROMPT_DEFINITIONS.map((item) => ({
+  ...item,
+  label: props.language === "zh" ? item.zh : item.en
+})));
+const quickPromptsDisabled = computed(() => mode.value === "report" ? reportLoading.value : chatLoading.value);
 
 const reportError = computed(() => report.hasError.value ? copy.value.reportError : "");
 const reportAnswerId = computed(() => reportResult.value?.sessionResult?.answerId || null);
@@ -445,6 +463,17 @@ function setStarterPrompt(prompt: string): void {
   chatInput.value = prompt;
 }
 
+function submitQuickPrompt(prompt: string): void {
+  if (quickPromptsDisabled.value) return;
+  if (mode.value === "report") {
+    reportPrompt.value = prompt;
+    void submitReport();
+    return;
+  }
+  chatInput.value = prompt;
+  void submitChat();
+}
+
 function addReportToMemory(result = reportResult.value): void {
   if (!result) return;
   if (props.session?.addMemory) {
@@ -631,6 +660,25 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="chatbot-modern-page" data-page="chatbot">
+    <header class="chatbot-quick-prompts" data-chatbot-quick-prompts>
+      <div class="chatbot-quick-prompts-head">
+        <span class="chatbot-quick-prompts-kicker">{{ copy.quickKicker }}</span>
+        <strong>{{ copy.quickTitle }}</strong>
+      </div>
+      <div class="chatbot-quick-prompts-list" role="group" :aria-label="copy.quickTitle">
+        <button
+          v-for="item in quickPrompts"
+          :key="item.id"
+          type="button"
+          class="chatbot-quick-prompt"
+          data-chatbot-quick-prompt
+          :data-prompt-key="`quick.${item.id}`"
+          :data-prompt="item.prompt"
+          :disabled="quickPromptsDisabled"
+          @click="submitQuickPrompt(item.prompt)"
+        >{{ item.label }}</button>
+      </div>
+    </header>
     <ChatbotOnboarding
       v-if="session"
       class="chatbot-page-onboarding"

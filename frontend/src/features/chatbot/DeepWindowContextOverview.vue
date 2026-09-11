@@ -164,6 +164,7 @@ const active = computed<Row>(() => {
 });
 const merchantName = computed(() => text(baseRow.value, ["brand", "merchantName", "merchant_name", "name"], notAvailable.value));
 const requestedAsin = computed(() => text(baseRow.value, ["asin", "matchedAsins", "matchedAsin", "productAsin", "productAsins"], notAvailable.value));
+const asinPerformanceAvailable = computed(() => Boolean(baseRow.value.asinPerformanceAvailable));
 
 const stats = computed(() => {
   const row = active.value;
@@ -375,7 +376,9 @@ function percentageOrUnavailable(row: Row, keys: readonly string[]): string {
       <strong>{{ language === "zh" ? "Deal 价格" : "Deal price" }}:</strong> {{ moneyOrUnavailable(baseRow, ["dealPrice", "deal_price", "salePrice"]) }}<br>
       <strong>{{ language === "zh" ? "原价" : "Original price" }}:</strong> {{ moneyOrUnavailable(baseRow, ["originalPrice", "original_price", "listPrice"]) }}<br>
       <strong>{{ language === "zh" ? "折扣比例" : "Discount %" }}:</strong> {{ percentageOrUnavailable(baseRow, ["discountPercent", "discountPercentage", "discountRate"]) }}<br>
-      {{ language === "zh" ? "ASIN 级表现不可用，以下展示关联商户表现。" : "ASIN-level performance is not available. Showing merchant-level performance instead." }}
+      <template v-if="!asinPerformanceAvailable">
+        {{ language === "zh" ? "ASIN 级表现不可用，以下展示关联商户表现。" : "ASIN-level performance is not available. Showing merchant-level performance instead." }}
+      </template>
     </p>
     <h4>{{ merchantName }}</h4>
     <label v-if="monthlyRows.length" class="merchant-month-picker deep-merchant-month-picker">

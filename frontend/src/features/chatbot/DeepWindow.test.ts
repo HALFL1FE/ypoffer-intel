@@ -274,6 +274,33 @@ describe("DeepWindow", () => {
     expect(text).toContain("ASIN 级表现不可用");
   });
 
+  it("展示已加载的 ASIN 级月度表现并隐藏商户降级说明", () => {
+    const asinReport = {
+      ...structuredMerchantReport,
+      intent: "asin",
+      title: "ASIN 查询",
+      rows: [{
+        ...structuredMerchantReport.rows[0],
+        asin: "B000000001",
+        asinPerformanceAvailable: true,
+        productName: "Alpha headphones",
+        monthly: [
+          { month: "2026-07", salesAmount: 80, orders: 1, clicks: 10 },
+          { month: "2026-08", salesAmount: 160, orders: 2, clicks: 20 }
+        ]
+      }],
+      blocks: []
+    } as unknown as ChatbotReportViewResult;
+    const wrapper = mount(DeepWindow, {
+      props: readyDeepWindow({ result: asinReport, contentHtml: "", recommendationHtml: "" })
+    });
+
+    const overview = wrapper.find("[data-deep-merchant-overview]");
+    expect(overview.text()).not.toContain("ASIN 级表现不可用");
+    expect(wrapper.find("[data-merchant-month-picker]").exists()).toBe(true);
+    expect(wrapper.get("[data-deep-context-stats]").text()).toContain("$160");
+  });
+
   it("restores a minimized window when its header is clicked without moving it", async () => {
     const wrapper = mount(DeepWindow, {
       props: { language: "en", result: deepWindowReport, minimized: true }

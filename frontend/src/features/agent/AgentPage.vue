@@ -112,11 +112,11 @@ let idCounter = 0;
 const copy = computed(() => props.language === "zh" ? {
   eyebrow: "YEAHPROMOS",
   title: "Agent 工作台",
-  subtitle: "商户 · 媒体 · 趋势",
+  subtitle: "商户 · ASIN · 媒体 · 趋势",
   readOnly: "只读数据工作区",
   newConversation: "新对话",
   stop: "停止",
-  placeholder: "询问商户、品类、Tier、付款或趋势…",
+  placeholder: "询问商户、ASIN、品类、Tier、付款或趋势…",
   send: "发送",
   welcomeKicker: "从一个数据问题开始",
   welcomeTitle: "查什么？",
@@ -126,6 +126,7 @@ const copy = computed(() => props.language === "zh" ? {
   capabilities: "能力",
   dataAgent: "数据 Agent",
   merchantAnalysis: "商户分析",
+  asinAnalysis: "ASIN 分析",
   categoryTier: "品类与 Tier",
   comparisons: "对比分析",
   paymentTrends: "付款与趋势",
@@ -140,16 +141,16 @@ const copy = computed(() => props.language === "zh" ? {
   retry: "重新编辑问题", taskHint: "选择一个示例，再按需修改", more: "更多查询", logs: "日志", questions: "问题记录", feedback: "回答反馈",
   context: "本轮上下文", contextEmpty: "暂无查询对象",
   results: "结果索引", resultsEmpty: "暂无结果", sourceHint: "来源与时间范围见各项结果。",
-  guide: "提问小提示", guideBody: "写明商户名称或 ID，再补充指标和月份。例如：比较 Tapo 最近 3 个月的收入与 EPC。",
+  guide: "提问小提示", guideBody: "写明商户名称、ASIN 或 ID，再补充指标和月份。例如：查询 B0D2HKCMBP 的产品信息和月度表现。",
   viewResults: "查看结果", readOnlyHint: "只读分析 · 不会修改业务数据"
 } : {
   eyebrow: "YEAHPROMOS",
   title: "Agent workspace",
-  subtitle: "Merchants · Publishers · Trends",
+  subtitle: "Merchants · ASINs · Publishers · Trends",
   readOnly: "Read-only data workspace",
   newConversation: "New conversation",
   stop: "Stop",
-  placeholder: "Ask about merchants, categories, tiers, payments, or trends…",
+  placeholder: "Ask about merchants, ASINs, categories, tiers, payments, or trends…",
   send: "Send",
   welcomeKicker: "START WITH A DATA QUESTION",
   welcomeTitle: "What are you looking for?",
@@ -159,6 +160,7 @@ const copy = computed(() => props.language === "zh" ? {
   capabilities: "Capabilities",
   dataAgent: "Data Agent",
   merchantAnalysis: "Merchant analysis",
+  asinAnalysis: "ASIN analysis",
   categoryTier: "Category and tier",
   comparisons: "Comparisons",
   paymentTrends: "Payments and trends",
@@ -173,17 +175,19 @@ const copy = computed(() => props.language === "zh" ? {
   retry: "Edit question again", taskHint: "Choose an example and make it yours", more: "More queries", logs: "Logs", questions: "Questions", feedback: "Feedback",
   context: "Query context", contextEmpty: "No query yet",
   results: "Result index", resultsEmpty: "No results yet", sourceHint: "Sources and time ranges are listed with each result.",
-  guide: "A useful starting point", guideBody: "Include a merchant name or ID, then a metric and time range. Try: compare Tapo revenue and EPC over the last 3 months.",
+  guide: "A useful starting point", guideBody: "Include a merchant name, ASIN, or ID, then a metric and time range. Try: look up B0D2HKCMBP product details and monthly performance.",
   viewResults: "View results", readOnlyHint: "Read-only analysis · Your business data stays unchanged"
 });
 
 const suggestions = computed(() => props.language === "zh" ? [
   { title: "了解一个商户", detail: "核心指标与表现", prompt: copy.value.example },
+  { title: "查询一个 ASIN", detail: "产品信息与月份表现", prompt: "查询 ASIN B0D2HKCMBP 的产品信息和月度表现" },
   { title: "查看趋势变化", detail: "多月趋势与指标切换", prompt: "查看 Tapo（ID398679）最近 6 个月的收入、订单和 EPC 趋势" },
   { title: "分析 Tier 商户", detail: "分层概览与商户列表", prompt: "分析 Tier 2 的整体表现，并列出商户及核心指标" },
   { title: "核对付款状态", detail: "付款记录与待支付款项", prompt: "查询 Tapo（ID398679）的付款状态和未支付记录" }
 ] : [
   { title: "Explore a merchant", detail: "Key metrics and performance", prompt: copy.value.example },
+  { title: "Look up an ASIN", detail: "Product details and monthly performance", prompt: "Look up product details and monthly performance for ASIN B0D2HKCMBP" },
   { title: "Follow a trend", detail: "Monthly trends and metric switching", prompt: "Show revenue, orders, and EPC trends for Tapo (ID398679) over the last 6 months" },
   { title: "Analyze a tier", detail: "Tier overview and merchant list", prompt: "Analyze Tier 2 performance and list its merchants with key metrics" },
   { title: "Check payments", detail: "Payment status and outstanding records", prompt: "Check payment status and unpaid records for Tapo (ID398679)" }

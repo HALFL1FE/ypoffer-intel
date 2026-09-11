@@ -13,6 +13,7 @@ export interface ReportDataProviderOptions {
   readonly loadOffers?: (signal: AbortSignal) => Promise<unknown>;
   readonly loadKeywords?: (signal: AbortSignal) => Promise<unknown>;
   readonly loadMerchant?: (merchantId: string, months: number, signal: AbortSignal) => Promise<unknown>;
+  readonly loadAsin?: (asins: readonly string[], months: number, signal: AbortSignal) => Promise<unknown>;
   readonly loadSearch?: (query: string, signal: AbortSignal) => Promise<unknown>;
   readonly loadPublishers?: (signal: AbortSignal) => Promise<unknown>;
   readonly loadPublisherPortfolio?: (userId: string, startDate: string | null, endDate: string | null, signal: AbortSignal) => Promise<unknown>;
@@ -83,6 +84,7 @@ export function createReportDataProvider(options: ReportDataProviderOptions): Re
   let keywordsPromise: Promise<unknown> | null = null;
   let publishersPromise: Promise<unknown> | null = null;
   const merchantPromises = new Map<string, Promise<unknown>>();
+  const asinPromises = new Map<string, Promise<unknown>>();
   const searchPromises = new Map<string, Promise<unknown>>();
   const portfolioPromises = new Map<string, Promise<unknown>>();
 
@@ -149,6 +151,27 @@ export function createReportDataProvider(options: ReportDataProviderOptions): Re
     return { rows: rows.filter((row) => String(row.merchantId ?? row.merchant_id ?? row.id ?? "") === merchantId) };
   }
 
+  async function asin(asins: readonly string[], months: number, signal: AbortSignal): Promise<unknown> {
+    const normalized = Array.from(new Set(asins.map((value) => String(value || "").trim().toUpperCase()).filter(Boolean))).sort();
+    const key = `${normalized.join(",")}::${months}`;
+    if (options.loadAsin) {
+      if (!asinPromises.has(key)) {
+        const sharedController = new AbortController();
+        asinPromises.set(key, options.loadAsin(normalized, months, sharedController.signal)
+          .then((payload) => {
+            if (hasPayloadData(payload, ["rows", "asins"])) detailSource = "db";
+            return payload;
+          })
+          .catch((error) => {
+            asinPromises.delete(key);
+            throw error;
+          }));
+      }
+      return awaitWithSignal(asinPromises.get(key)!, signal);
+    }
+    return { rows: [] };
+  }
+
   async function search(query: string, signal: AbortSignal): Promise<unknown> {
     const key = query.trim().toLowerCase();
     if (options.loadSearch) {
@@ -200,6 +223,7 @@ export function createReportDataProvider(options: ReportDataProviderOptions): Re
     paymentRecords,
     keywords,
     merchant,
+    asin,
     search,
     publishers,
     publisherPortfolio,

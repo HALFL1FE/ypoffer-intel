@@ -25,10 +25,12 @@ const file = ref<File | null>(null),
 const preview = ref<PromotionBatch | null>(null),
   date = ref(""),
   name = ref("");
+const dragging = ref(false);
 const dates = computed(() => windowDates(date.value));
 const asinCount = computed(
   () => preview.value?.offers.reduce((sum, o) => sum + o.asins.length, 0) || 0,
 );
+const supportedExtensions = [".xlsx", ".xls", ".csv", ".tsv"];
 let revision = 0;
 let disposed = false;
 let previousOverflow: string | null = null;
@@ -37,11 +39,54 @@ function unlockScroll() {
   document.documentElement.style.overflow = previousOverflow;
   previousOverflow = null;
 }
-function choose(event: Event) {
-  const selected = (event.target as HTMLInputElement).files?.[0];
+function selectFile(selected: File | undefined) {
   if (!selected) return;
+  if (
+    !supportedExtensions.some((extension) =>
+      selected.name.toLowerCase().endsWith(extension),
+    )
+  ) {
+    error.value = t(
+      "请选择 XLSX、XLS、CSV 或 TSV 文件。",
+      "Choose an XLSX, XLS, CSV, or TSV file.",
+    );
+    return;
+  }
   file.value = selected;
   error.value = "";
+}
+function choose(event: Event) {
+  selectFile((event.target as HTMLInputElement).files?.[0]);
+}
+function dragEnter(event: DragEvent) {
+  if (reading.value) return;
+  event.preventDefault();
+  dragging.value = true;
+}
+function dragOver(event: DragEvent) {
+  if (reading.value) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  dragging.value = true;
+}
+function dragLeave(event: DragEvent) {
+  const current = event.currentTarget as HTMLElement;
+  if (event.relatedTarget instanceof Node && current.contains(event.relatedTarget)) {
+    return;
+  }
+  dragging.value = false;
+}
+function drop(event: DragEvent) {
+  event.preventDefault();
+  dragging.value = false;
+  if (reading.value) return;
+  selectFile(event.dataTransfer?.files?.[0]);
+  if (!event.dataTransfer?.files?.length) {
+    error.value = t(
+      "请从文件夹中拖入一个 XLSX、XLS、CSV 或 TSV 文件。",
+      "Drop an XLSX, XLS, CSV, or TSV file from a folder.",
+    );
+  }
 }
 async function readPreview() {
   if (!file.value || reading.value) return;
@@ -123,7 +168,21 @@ onBeforeUnmount(() => {
       <li><b>2</b>{{ t("预览并确认", "Review and confirm") }}</li>
       <li><b>3</b>{{ t("选择追踪清单", "Select tracking list") }}</li>
     </ol>
-    <div class="promotion-file-choice">
+    <div
+      class="promotion-file-choice"
+      :class="{ 'is-dragging': dragging }"
+      role="group"
+      :aria-label="
+        t(
+          '将商家文件拖到这里，或点击选择文件',
+          'Drop a merchant file here or choose one',
+        )
+      "
+      @dragenter.prevent="dragEnter"
+      @dragover.prevent="dragOver"
+      @dragleave="dragLeave"
+      @drop.prevent="drop"
+    >
       <svg
         viewBox="0 0 24 24"
         fill="none"
@@ -142,7 +201,10 @@ onBeforeUnmount(() => {
         ><small>{{
           file
             ? t("文件已选择，尚未导入", "File selected; not imported yet")
-            : "XLSX · XLS · CSV · TSV"
+            : t(
+                "XLSX · XLS · CSV · TSV · 可从文件夹拖入",
+                "XLSX · XLS · CSV · TSV · Drop from a folder",
+              )
         }}</small>
       </div>
       <input

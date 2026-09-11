@@ -951,6 +951,7 @@ function chatbotSession(snapshot: AppBootstrapData): ChatbotSession {
       loadOffers: (signal) => apiRequest<unknown>("/api/ui/db/chatbot-offers", { signal }),
       loadKeywords: (signal) => apiRequest<unknown>("/api/ui/db/keywords", { signal }),
       loadMerchant: (merchantId, months, signal) => apiRequest<unknown>(`/api/ui/db/merchant?${new URLSearchParams({ merchantId, months: String(months), limit: "50" }).toString()}`, { signal, timeoutMs: 30_000 }),
+      loadAsin: (asins, months, signal) => apiRequest<unknown>(`/api/ui/db/asin?${new URLSearchParams({ asins: asins.join(","), months: String(months) }).toString()}`, { signal, timeoutMs: 30_000 }),
       loadSearch: (query, signal) => apiRequest<unknown>(`/api/ui/db/search?${new URLSearchParams({ q: query, limit: "25" }).toString()}`, { signal }),
       loadPublishers: (signal) => apiRequest<unknown>("/api/ui/db/publishers", { signal, timeoutMs: 30_000 }),
       loadPublisherPortfolio: (userId, startDate, endDate, signal) => {

@@ -28,11 +28,31 @@ async function choose(wrapper: ReturnType<typeof mount>) {
   });
   await input.trigger("change");
 }
+async function dropFile(wrapper: ReturnType<typeof mount>, file: File) {
+  const event = new Event("drop", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "dataTransfer", {
+    configurable: true,
+    value: { files: [file] },
+  });
+  await wrapper.get(".promotion-file-choice").element.dispatchEvent(event);
+  await wrapper.vm.$nextTick();
+}
 afterEach(() => {
   mounted.splice(0).forEach((w) => w.unmount());
   document.body.innerHTML = "";
 });
 describe("review before importing merchant lists", () => {
+  it("accepts a supported workbook dropped from a folder", async () => {
+    const { wrapper: w } = setup();
+    await dropFile(w, new File(["sample"], "merchants.xlsx"));
+
+    expect(w.text()).toContain("merchants.xlsx");
+    expect(w.text()).toContain("文件已选择，尚未导入");
+    expect(
+      w.get(".promotion-import-action button").attributes("disabled"),
+    ).toBeUndefined();
+  });
+
   it("only reads after the preview button and emits a deduplicated list only after confirmation", async () => {
     const { wrapper: w, readFile } = setup();
     expect(

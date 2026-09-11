@@ -8,6 +8,7 @@ export interface AgentCommand {
 const query = (zh: string, en: string) => (value: string, language: UiLanguage) => `${language === "zh" ? zh : en} ${value}`;
 export const AGENT_COMMANDS: readonly AgentCommand[] = [
   { key: "merchant", zh: "商户分析", en: "Merchant", zhHint: "商户名或 ID，例如 Tapo", enHint: "Merchant name or ID, e.g. Tapo", template: query("分析商户", "Analyze merchant") },
+  { key: "asin", zh: "ASIN 分析", en: "ASIN analysis", zhHint: "10 位 ASIN，例如 B0D2HKCMBP", enHint: "10-character ASIN, e.g. B0D2HKCMBP", template: query("查询 ASIN", "Look up ASIN") },
   { key: "publisher", zh: "媒体记录", en: "Publisher", zhHint: "媒体名、ID 或筛选条件", enHint: "Publisher name, ID, or filters", route: "publisher", template: (v) => `publisher: ${v}` },
   { key: "publisherprofile", zh: "媒体画像", en: "Publisher profile", zhHint: "媒体名或 ID，可补充站点", enHint: "Publisher name or ID, optional market", route: "publisherprofile", template: (v) => `publisherprofile: ${v}` },
   { key: "trend", zh: "月度趋势", en: "Monthly trend", zhHint: "对象、月份和指标，例如 Tapo 最近 6 个月收入", enHint: "Target, months, metric, e.g. Tapo 6 months revenue", template: query("查看月度趋势", "Show monthly trends for") },
