@@ -17,7 +17,7 @@ from agent_tool_registry import (
 )
 
 
-def test_registry_has_exactly_eight_tools():
+def test_registry_has_exactly_nine_tools():
     assert AGENT_TOOL_NAMES == (
         "merchant_analysis",
         "category_analysis",
@@ -27,6 +27,7 @@ def test_registry_has_exactly_eight_tools():
         "payment_status",
         "trend",
         "asin_analysis",
+        "promotion_analysis",
     )
     assert set(AGENT_RESULT_FIELDS) == set(AGENT_TOOL_NAMES)
 
@@ -61,6 +62,12 @@ def test_tool_definitions_are_language_specific():
     assert zh[0]["name"] == "merchant_analysis"
     assert zh[0]["description"] != en[0]["description"]
     assert zh[0]["parameters"]["required"] == ["merchant"]
+
+
+def test_promotion_tool_exposes_merchant_media_view():
+    definitions = get_agent_tool_definitions("zh", ["promotion_analysis"])
+    view = definitions[0]["parameters"]["properties"]["view"]
+    assert "merchant_media" in view["enum"]
 
 
 def test_tool_arguments_are_closed_and_bounded():

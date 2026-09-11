@@ -22,6 +22,8 @@ export interface PromotionBatch {
   name: string;
   sourceFile: string;
   launchDate: string;
+  observationStart?: string;
+  observationEnd?: string;
   offers: TrackedOffer[];
   local?: boolean;
   customized?: boolean;
@@ -69,6 +71,24 @@ export interface ReportRequest {
   endDate?: string;
   merchantId?: string;
 }
+export interface PromotionWindow {
+  startDate: string;
+  endDate: string;
+  beforeStart: string;
+  beforeEnd: string;
+  days: number;
+}
+export interface TrackedOfferParseDiagnostics {
+  totalRows: number;
+  invalidIdRows: number;
+  duplicateRows: number;
+  missingNameRows: number;
+  sheetsWithMerchantHeader: number;
+}
+export interface ParsedTrackedOffers {
+  offers: TrackedOffer[];
+  diagnostics: TrackedOfferParseDiagnostics;
+}
 export const emptyMetrics = (): Metrics => ({
   revenue: null,
   clicks: null,
@@ -84,7 +104,7 @@ export function addDays(date: string, days: number): string {
     ? value.toISOString().slice(0, 10)
     : "";
 }
-export function windowDates(launch: string, start?: string, end?: string) {
+export function windowDates(launch: string, start?: string, end?: string): PromotionWindow | null {
   if (Boolean(start) !== Boolean(end)) return null;
   const valid = (v: string) =>
     /^\d{4}-\d{2}-\d{2}$/.test(v) && addDays(v, 0) === v;
@@ -100,6 +120,18 @@ export function windowDates(launch: string, start?: string, end?: string) {
     beforeEnd: addDays(from, -1),
     days,
   };
+}
+export function observationWindow(batch: PromotionBatch) {
+  return (
+    (batch.observationStart &&
+      batch.observationEnd &&
+      windowDates(
+        batch.launchDate,
+        batch.observationStart,
+        batch.observationEnd,
+      )) ||
+    windowDates(batch.launchDate)
+  );
 }
 export function observedDays(
   start: string,
@@ -159,12 +191,12 @@ export function monthlyBaseline(
     peak: revenue.length ? Math.max(...revenue) : null,
   };
 }
-export function parseBatch(
-  tables: unknown[][][],
-  sourceFile: string,
-  launchDate: string,
-): PromotionBatch {
+export function parseTrackedOffers(tables: unknown[][][]): ParsedTrackedOffers {
   const offers = new Map<string, TrackedOffer>();
+  let totalRows = 0;
+  let invalidIdRows = 0;
+  let duplicateRows = 0;
+  let sheetsWithMerchantHeader = 0;
   for (const table of tables) {
     const index = table.findIndex((row) =>
       row.some((cell) =>
@@ -172,6 +204,7 @@ export function parseBatch(
       ),
     );
     if (index < 0) continue;
+    sheetsWithMerchantHeader += 1;
     const headers = table[index]!.map((cell) =>
       String(cell).trim().toLowerCase(),
     );
@@ -179,8 +212,13 @@ export function parseBatch(
       /^(merchant\s*id|商家\s*id)$/.test(h),
     );
     for (const row of table.slice(index + 1)) {
+      if (row.some((cell) => String(cell ?? "").trim())) totalRows += 1;
       const id = String(row[idIndex] ?? "").trim();
-      if (!/^[1-9]\d{0,12}$/.test(id)) continue;
+      if (!/^[1-9]\d{0,12}$/.test(id)) {
+        if (row.some((cell) => String(cell ?? "").trim())) invalidIdRows += 1;
+        continue;
+      }
+      if (offers.has(id)) duplicateRows += 1;
       const field = (pattern: RegExp) =>
         String(row[headers.findIndex((h) => pattern.test(h))] ?? "").trim();
       const item = offers.get(id) || {
@@ -201,8 +239,27 @@ export function parseBatch(
       offers.set(id, item);
     }
   }
-  if (!offers.size || offers.size > 200) throw new Error("IMPORT_IDS");
-  if ([...offers.values()].some((o) => !o.merchantName))
+  const parsedOffers = [...offers.values()];
+  return {
+    offers: parsedOffers,
+    diagnostics: {
+      totalRows,
+      invalidIdRows,
+      duplicateRows,
+      missingNameRows: parsedOffers.filter((offer) => !offer.merchantName).length,
+      sheetsWithMerchantHeader,
+    },
+  };
+}
+
+export function parseBatch(
+  tables: unknown[][][],
+  sourceFile: string,
+  launchDate: string,
+): PromotionBatch {
+  const { offers } = parseTrackedOffers(tables);
+  if (!offers.length || offers.length > 200) throw new Error("IMPORT_IDS");
+  if (offers.some((o) => !o.merchantName))
     throw new Error("IMPORT_NAMES");
   return {
     id: `local-${Date.now()}`,
@@ -273,6 +330,18 @@ export function restoreBatches(
         {
           ...b,
           launchDate: override?.launchDate || b.launchDate,
+          ...(override?.observationStart &&
+          override?.observationEnd &&
+          windowDates(
+            override.launchDate,
+            override.observationStart,
+            override.observationEnd,
+          )
+            ? {
+                observationStart: override.observationStart,
+                observationEnd: override.observationEnd,
+              }
+            : {}),
           ...(override?.customized
             ? { offers: override.offers, customized: true }
             : {}),

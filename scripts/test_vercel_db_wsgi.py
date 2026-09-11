@@ -87,6 +87,12 @@ def main():
             "months": months,
             "minimal": minimal,
         }
+        module.asin_payload = lambda asins, months: {
+            "route": "asin",
+            "asins": asins.split(","),
+            "months": months,
+            "rows": [{"asin": asins.split(",")[0], "merchantId": "42"}],
+        }
         module.search_payload = lambda text, limit: {
             "route": "search",
             "q": text,
@@ -198,6 +204,14 @@ def main():
         assert_equal(merchant["status"], 200, "merchant response code")
         assert b'"route":"merchant"' in merchant["body"], merchant["body"]
 
+        asin = request(
+            module.app,
+            "asin",
+            "asins=B000000001&months=6",
+        )
+        assert_equal(asin["status"], 200, "asin response code")
+        assert b'"route":"asin"' in asin["body"], asin["body"]
+
         search = request(module.app, "search", "action=status&q=coffee&limit=5")
         assert_equal(search["status"], 200, "search response code")
         assert b'"route":"search"' in search["body"], search["body"]
@@ -221,6 +235,17 @@ def main():
 
         invalid_ui_merchant = request(module.app, "ui-merchant", "merchantId=abc", token="")
         assert_equal(invalid_ui_merchant["status"], 400, "invalid UI merchant response code")
+
+        ui_asin = request(
+            module.app,
+            "ui-asin",
+            "asins=B000000001&months=6",
+            token="",
+        )
+        assert_equal(ui_asin["status"], 200, "UI ASIN response code")
+        assert b'"route":"asin"' in ui_asin["body"], ui_asin["body"]
+        assert b'"asins":["B000000001"]' in ui_asin["body"], ui_asin["body"]
+        assert b'"months":6' in ui_asin["body"], ui_asin["body"]
 
         ui_search = request(module.app, "ui-search", "q=coffee&limit=5", token="")
         assert_equal(ui_search["status"], 200, "UI search response code")

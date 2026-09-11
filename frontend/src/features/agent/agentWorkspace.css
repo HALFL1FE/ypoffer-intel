@@ -36,6 +36,9 @@ body.dashboard-mode .dashboard-agent-page.is-modern .agent-workspace { height: 1
   isolation: isolate;
   display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
+  --aw-content-width: 1080px;
+  --aw-gutter: clamp(20px, 3vw, 36px);
   box-sizing: border-box;
   width: 100%;
   height: calc(100dvh - 152px);
@@ -46,7 +49,7 @@ body.dashboard-mode .dashboard-agent-page.is-modern .agent-workspace { height: 1
   color: var(--aw-ink);
   background: var(--aw-bg);
   border: 1px solid rgb(36 52 76 / 15%);
-  border-radius: 30px;
+  border-radius: 24px;
   box-shadow: var(--aw-shadow);
   font-family: var(--oi-modern-font-family, "Plus Jakarta Sans", system-ui, sans-serif);
 }
@@ -86,8 +89,8 @@ body.dashboard-mode .dashboard-agent-page.is-modern .agent-workspace { height: 1
   align-items: center;
   justify-content: space-between;
   flex: 0 0 auto;
-  gap: 24px;
-  padding: 24px 30px 22px;
+  gap: 18px;
+  padding: 16px 24px;
   background: linear-gradient(108deg, rgb(255 255 255 / 98%), rgb(248 250 253 / 94%));
   border-bottom: 1px solid var(--aw-line);
 }
@@ -160,34 +163,43 @@ body.dashboard-mode .dashboard-agent-page.is-modern .agent-workspace { height: 1
 
 /* 对话主区与冷静蓝灰底色 */
 .agent-workspace .aw-layout { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; min-height: 0; background: linear-gradient(180deg, rgb(255 255 255 / 38%), rgb(243 245 249 / 80%)); }
-.agent-workspace .aw-layout-with-details { grid-template-columns: minmax(0, 1fr) 304px; }
-.agent-workspace .aw-conversation { display: flex; position: relative; flex-direction: column; min-width: 0; min-height: 0; }
-.agent-workspace .aw-conversation-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: 0 0 auto; padding: 21px 40px 5px; color: var(--aw-muted); font-size: 10px; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
+.agent-workspace .aw-layout-with-details { grid-template-columns: minmax(0, 1fr) 260px; }
+.agent-workspace .aw-conversation { display: flex; position: relative; flex-direction: column; min-width: 0; min-height: 0; container-type: inline-size; }
+.agent-workspace .aw-conversation-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: 0 0 auto; width: min(100%, var(--aw-content-width)); margin: 0 auto; padding: 14px var(--aw-gutter) 6px; color: var(--aw-muted); font-size: 10px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
 .agent-workspace .aw-conversation-bar span { display: inline-flex; align-items: center; gap: 8px; }
 .agent-workspace .aw-conversation-bar span::before { width: 5px; height: 5px; border-radius: 50%; background: var(--aw-accent); content: ""; box-shadow: 0 0 0 4px var(--aw-accent-soft); }
 .agent-workspace .aw-conversation-bar button { padding: 5px 0; border: 0; color: var(--aw-blue); background: none; font-size: 10px; font-weight: 750; letter-spacing: .02em; text-transform: none; }
 .agent-workspace .aw-conversation-bar button:hover { color: var(--aw-accent); transform: translateX(2px); }
 .agent-workspace .aw-log { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-color: rgb(36 94 206 / 22%) transparent; scrollbar-width: thin; }
-.agent-workspace .aw-log-content { width: min(100%, 1040px); margin: 0 auto; padding: 16px 40px 36px; }
+.agent-workspace .aw-log-content { width: min(100%, var(--aw-content-width)); margin: 0 auto; padding: 12px var(--aw-gutter) 24px; }
 
-/* 欢迎态使用不对称 Bento 卡片，减少“模板化后台”观感。 */
-.agent-workspace .aw-welcome { position: relative; max-width: 880px; margin: 0 auto; padding: clamp(45px, 8vh, 96px) 0 52px; animation: aw-enter 720ms cubic-bezier(.22, .8, .2, 1) both; }
+/* 六个示例等高排列，避免空卡片占用对话阅读空间。 */
+.agent-workspace .aw-welcome { position: relative; width: min(100%, 760px); margin: 0 auto; padding: 8px 0; animation: aw-enter 720ms cubic-bezier(.22, .8, .2, 1) both; }
 .agent-workspace .aw-welcome::after { position: absolute; top: 28px; right: -16px; width: 170px; height: 170px; border-radius: 50%; background: radial-gradient(circle, rgb(47 134 183 / 14%), transparent 68%); content: ""; pointer-events: none; }
-.agent-workspace .aw-welcome-caption { display: inline-flex; align-items: center; width: fit-content; margin-bottom: 18px; padding: 7px 11px; border: 1px solid rgb(47 134 183 / 18%); border-radius: 999px; color: var(--aw-accent); background: var(--aw-accent-soft); font-size: 9px; font-weight: 850; letter-spacing: .17em; }
-.agent-workspace .aw-welcome h3 { position: relative; z-index: 1; max-width: 650px; margin: 0; color: var(--aw-ink); font-size: clamp(34px, 4vw, 54px); font-weight: 720; line-height: 1.1; letter-spacing: -.065em; }
-.agent-workspace .aw-intro { position: relative; z-index: 1; max-width: 570px; margin: 19px 0 0; color: var(--aw-muted); font-size: 14px; line-height: 1.85; }
+.agent-workspace .aw-welcome-caption { display: inline-flex; align-items: center; width: fit-content; margin-bottom: 10px; padding: 5px 10px; border: 1px solid rgb(47 134 183 / 18%); border-radius: 999px; color: var(--aw-accent); background: var(--aw-accent-soft); font-size: 9px; font-weight: 750; letter-spacing: .12em; }
+.agent-workspace .aw-welcome h3 { position: relative; z-index: 1; max-width: 650px; margin: 0; color: var(--aw-ink); font-size: clamp(28px, 3vw, 40px); font-weight: 720; line-height: 1.2; letter-spacing: -.035em; text-wrap: balance; }
+.agent-workspace .aw-intro { position: relative; z-index: 1; max-width: 570px; margin: 10px 0 0; color: var(--aw-muted); font-size: 13px; line-height: 1.7; }
 .agent-workspace .aw-memory { position: relative; z-index: 1; margin: 26px 0 0; padding: 15px 17px; border: 1px solid rgb(36 94 206 / 13%); border-left: 3px solid var(--aw-blue); border-radius: 17px; color: var(--aw-blue-deep); background: linear-gradient(110deg, var(--aw-tint), rgb(255 255 255 / 70%)); box-shadow: var(--aw-card-shadow); font-size: 12px; line-height: 1.7; }
-.agent-workspace .aw-task-heading { display: flex; align-items: center; gap: 12px; margin: 48px 0 16px; color: var(--aw-muted); font-size: 10px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+.agent-workspace .aw-task-heading { display: flex; align-items: center; gap: 12px; margin: 18px 0 12px; color: var(--aw-muted); font-size: 10px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
 .agent-workspace .aw-task-heading::after { height: 1px; flex: 1; background: linear-gradient(90deg, var(--aw-line-strong), transparent); content: ""; }
-.agent-workspace .aw-suggestions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(100px, auto); gap: 13px; }
-.agent-workspace .aw-suggestion { display: flex; align-items: flex-start; gap: 15px; min-height: 100px; padding: 20px; border: 1px solid var(--aw-line); border-radius: 22px; color: var(--aw-ink); background: linear-gradient(145deg, rgb(255 255 255 / 98%), rgb(248 250 253 / 92%)); box-shadow: var(--aw-card-shadow); text-align: left; }
-.agent-workspace .aw-suggestion:first-child { grid-row: span 2; min-height: 213px; }
+.agent-workspace .aw-suggestions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 10px; }
+.agent-workspace .aw-suggestion { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; align-items: center; gap: 12px; min-height: 94px; padding: 16px; border: 1px solid var(--aw-line); border-radius: 18px; color: var(--aw-ink); background: linear-gradient(145deg, rgb(255 255 255 / 98%), rgb(248 250 253 / 92%)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 80%), 0 8px 20px -18px rgb(36 52 76 / 24%); text-align: left; transition: transform 420ms cubic-bezier(.22, .8, .2, 1), border-color 420ms cubic-bezier(.22, .8, .2, 1), box-shadow 420ms cubic-bezier(.22, .8, .2, 1); }
 .agent-workspace .aw-suggestion:hover { border-color: rgb(47 134 183 / 42%); background: linear-gradient(145deg, #fff, #edf4ff); box-shadow: 0 24px 46px -30px rgb(36 94 206 / 28%), inset 0 1px 0 rgb(255 255 255 / 92%); transform: translateY(-5px); }
+.agent-workspace .aw-suggestion-new-feature { border-color: rgb(180 79 97 / 28%); background: linear-gradient(112deg, rgb(255 247 248 / 98%), rgb(248 250 253 / 94%)); }
+.agent-workspace .aw-suggestion-new-feature:hover { border-color: rgb(180 79 97 / 54%); border-left-color: var(--aw-danger); background: linear-gradient(112deg, rgb(255 242 244 / 99%), rgb(237 244 255 / 96%)); box-shadow: 0 24px 46px -30px rgb(180 79 97 / 24%), inset 0 1px 0 rgb(255 255 255 / 92%); }
+.agent-workspace .aw-suggestion-meta { display: contents; }
+.agent-workspace .aw-suggestion { min-height: 82px; }
+.agent-workspace .aw-suggestion-meta .aw-suggestion-number { grid-column: 1; grid-row: 1; }
+.agent-workspace .aw-suggestion-meta .aw-suggestion-arrow { grid-column: 3; grid-row: 1; }
 .agent-workspace .aw-suggestion-number { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 29px; width: 29px; height: 29px; border: 1px solid rgb(47 134 183 / 24%); border-radius: 10px; color: var(--aw-accent); background: rgb(230 243 248 / 76%); font-size: 10px; font-variant-numeric: tabular-nums; }
-.agent-workspace .aw-suggestion strong { display: block; padding-top: 2px; font-size: 13px; line-height: 1.4; font-weight: 700; }
-.agent-workspace .aw-suggestion small { display: block; margin-top: 8px; color: var(--aw-muted); font-size: 11px; line-height: 1.55; }
-.agent-workspace .aw-suggestion-arrow { margin-left: auto; color: var(--aw-blue); font-size: 18px; line-height: 1; transition: transform 520ms cubic-bezier(.22, .8, .2, 1); }
+.agent-workspace .aw-suggestion-new-feature .aw-suggestion-number { border-color: rgb(180 79 97 / 30%); color: var(--aw-danger); background: rgb(180 79 97 / 9%); }
+.agent-workspace .aw-suggestion-copy { grid-column: 2; grid-row: 1; min-width: 0; overflow-wrap: anywhere; }
+.agent-workspace .aw-suggestion strong { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding-top: 2px; font-size: 13px; line-height: 1.4; font-weight: 700; }
+.agent-workspace .aw-suggestion-new { display: inline-flex; align-items: center; flex: 0 0 auto; padding: 3px 6px; border: 1px solid rgb(180 79 97 / 28%); border-radius: 999px; color: #fff; background: linear-gradient(135deg, #c56473, #a54857); box-shadow: 0 8px 16px -12px rgb(180 79 97 / 70%); font-size: 8px; font-style: normal; font-weight: 850; line-height: 1; letter-spacing: .12em; text-transform: uppercase; }
+.agent-workspace .aw-suggestion small { display: block; margin-top: 6px; color: var(--aw-muted); font-size: 11px; line-height: 1.55; }
+.agent-workspace .aw-suggestion-arrow { display: grid; width: 29px; height: 29px; place-items: center; border: 1px solid rgb(36 94 206 / 14%); border-radius: 50%; color: var(--aw-blue); background: rgb(36 94 206 / 6%); font-size: 16px; line-height: 1; transition: transform 520ms cubic-bezier(.22, .8, .2, 1), background 520ms cubic-bezier(.22, .8, .2, 1), border-color 520ms cubic-bezier(.22, .8, .2, 1); }
 .agent-workspace .aw-suggestion:hover .aw-suggestion-arrow { transform: translate(3px, -3px); }
+.agent-workspace .aw-suggestion-new-feature .aw-suggestion-arrow { border-color: rgb(180 79 97 / 24%); color: var(--aw-danger); background: rgb(180 79 97 / 8%); }
 .agent-workspace .aw-more-suggestions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 19px; margin-top: 20px; color: var(--aw-muted); font-size: 10px; }
 .agent-workspace .aw-more-suggestions > span { font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .agent-workspace .aw-more-suggestions button { padding: 6px 0; border: 0; color: var(--aw-ink); background: transparent; font-size: 11px; }
@@ -231,11 +243,34 @@ body.dashboard-mode .dashboard-agent-page.is-modern .agent-workspace { height: 1
 .agent-workspace .aw-loading-lines i:last-child { width: 48%; }
 
 /* 输入岛：内外双层结构，主按钮保留独立圆形箭头 */
-.agent-workspace .aw-composer-area { position: relative; flex: 0 0 auto; width: min(100%, 1040px); margin: 0 auto; padding: 18px 40px 22px; background: linear-gradient(180deg, rgb(243 245 249 / 0%), var(--aw-bg) 30%); }
+.agent-workspace .aw-composer-area { position: relative; display: flex; flex-direction: column; flex: 0 0 auto; min-height: 0; width: min(100%, var(--aw-content-width)); max-height: 52%; margin: 0 auto; padding: 10px var(--aw-gutter) 16px; background: var(--aw-bg); }
+.agent-workspace .aw-composer-area:not(.aw-composer-collapsed) .aw-composer-expandable { min-height: 0; }
+.agent-workspace .aw-composer-area:not(.aw-composer-collapsed) .aw-composer { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .agent-workspace .aw-composer { position: relative; padding: 18px 18px 14px; border: 1px solid rgb(36 94 206 / 17%); border-radius: 25px; background: linear-gradient(145deg, rgb(255 255 255 / 99%), rgb(248 250 253 / 98%)); box-shadow: 0 24px 48px -31px rgb(36 52 76 / 28%), inset 0 1px 0 rgb(255 255 255 / 94%); transition: border-color 620ms cubic-bezier(.22, .8, .2, 1), box-shadow 620ms cubic-bezier(.22, .8, .2, 1), transform 620ms cubic-bezier(.22, .8, .2, 1); }
 .agent-workspace .aw-composer:focus-within { border-color: rgb(36 94 206 / 42%); box-shadow: 0 28px 54px -32px rgb(36 94 206 / 38%), inset 0 1px 0 rgb(255 255 255 / 94%); transform: translateY(-2px); }
 .agent-workspace .aw-composer textarea { display: block; width: 100%; min-height: 56px; max-height: 168px; padding: 0; border: 0; border-radius: 0; outline: none; resize: none; color: var(--aw-ink); background: transparent; box-shadow: none; font-size: 14px; line-height: 1.75; }
-.agent-workspace .aw-composer textarea::placeholder { color: rgb(91 107 130 / 72%); }
+.agent-workspace .aw-composer textarea::placeholder { color: var(--aw-muted); opacity: .8; }
+.agent-workspace .agent-attachment { margin-bottom: 12px; }
+.agent-workspace .agent-attachment .aw-button { color: var(--aw-ink); background: var(--aw-surface); }
+.agent-workspace .agent-attachment-dropzone { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 8px 10px; border: 1px dashed rgb(36 94 206 / 24%); border-radius: 14px; color: var(--aw-muted); background: rgb(245 248 253 / 74%); transition: border-color 180ms ease, background 180ms ease, transform 180ms ease; }
+.agent-workspace .agent-attachment-dropzone.is-dragging { border-color: var(--aw-blue); background: rgb(231 239 255 / 90%); transform: translateY(-1px); }
+.agent-workspace .agent-attachment-dropzone.is-disabled { opacity: .66; }
+.agent-workspace .agent-attachment-icon { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 9px; color: var(--aw-blue); background: rgb(36 94 206 / 10%); font-size: 18px; font-weight: 800; }
+.agent-workspace .agent-attachment-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.agent-workspace .agent-attachment-copy strong { overflow: hidden; color: var(--aw-ink); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-workspace .agent-attachment-copy small, .agent-workspace .agent-attachment-note { color: var(--aw-muted); font-size: 10px; }
+.agent-workspace .agent-attachment-chip { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 8px; padding: 9px 10px; border: 1px solid rgb(36 94 206 / 18%); border-radius: 13px; color: var(--aw-muted); background: var(--aw-tint); font-size: 11px; }
+.agent-workspace .agent-attachment-chip > div { min-width: 0; flex: 1; }
+.agent-workspace .agent-attachment-chip strong { color: var(--aw-ink); }
+.agent-workspace .agent-attachment-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-workspace .agent-attachment-chip small { color: var(--aw-muted); font-size: 10px; }
+.agent-workspace .agent-attachment-date-label { display: inline-flex; align-items: center; gap: 6px; color: var(--aw-muted); font-size: 10px; }
+.agent-workspace .agent-attachment-dates { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.agent-workspace .agent-attachment-date-label input { width: 124px; padding: 5px 7px; border: 1px solid var(--aw-line); border-radius: 8px; color: var(--aw-ink); background: var(--aw-surface); font-size: 11px; }
+.agent-workspace .agent-attachment-remove { border: 0; color: var(--aw-muted); background: transparent; cursor: pointer; font-size: 10px; }
+.agent-workspace .agent-attachment-remove:hover:not(:disabled) { color: #bd3d4b; }
+.agent-workspace .agent-attachment-note { margin: 7px 2px 0; }
+.agent-workspace .agent-attachment-error { margin: 7px 2px 0; color: #bd3d4b; font-size: 10px; }
 .agent-workspace .aw-composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
 .agent-workspace .aw-composer-hint { color: var(--aw-muted); font-size: 10px; }
 .agent-workspace .aw-submit { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 40px; padding: 0 9px 0 17px; border: 0; border-radius: 999px; color: #fff; background: var(--aw-blue); box-shadow: 0 12px 24px -16px rgb(36 94 206 / 42%); font-size: 11px; font-weight: 750; }
@@ -337,13 +372,13 @@ body.dashboard-mode .dashboard-agent-page.is-modern .agent-workspace { height: 1
 .agent-workspace .agent-run-partial { margin: 0 18px 15px; padding: 12px 13px; border: 1px solid rgb(154 109 47 / 22%); border-left: 3px solid var(--aw-warning); border-radius: 0 14px 14px 0; color: var(--aw-warning); background: rgb(154 109 47 / 9%); font-size: 10px; }
 
 /* 右侧查询详情 */
-.agent-workspace .aw-details { display: flex; flex-direction: column; min-height: 0; overflow: auto; padding: 27px 24px 25px; border-left: 1px solid var(--aw-line); background: linear-gradient(180deg, rgb(255 255 255 / 94%), rgb(247 249 252 / 94%)); animation: aw-details-in 620ms cubic-bezier(.22, .8, .2, 1) both; }
+.agent-workspace .aw-details { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; padding: 18px 20px; border-left: 1px solid var(--aw-line); background: linear-gradient(180deg, rgb(255 255 255 / 94%), rgb(247 249 252 / 94%)); animation: aw-details-in 620ms cubic-bezier(.22, .8, .2, 1) both; }
 .agent-workspace .aw-details-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
 .agent-workspace .aw-details-heading h3 { margin: 0; color: var(--aw-ink); font-size: 14px; font-weight: 750; letter-spacing: -.025em; }
 .agent-workspace .aw-close { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--aw-line); border-radius: 50%; color: var(--aw-muted); background: var(--aw-surface); font-size: 19px; line-height: 1; }
 .agent-workspace .aw-close:hover { border-color: rgb(47 134 183 / 30%); color: var(--aw-accent); background: var(--aw-accent-soft); transform: rotate(8deg); }
-.agent-workspace .aw-detail-section { padding: 23px 0; border-bottom: 1px solid var(--aw-line); }
-.agent-workspace .aw-detail-section h4 { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 13px; color: var(--aw-ink); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.agent-workspace .aw-detail-section { padding: 18px 0; border-bottom: 1px solid var(--aw-line); }
+.agent-workspace .aw-detail-section h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 13px; color: var(--aw-ink); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .agent-workspace .aw-detail-section h4::before { width: 4px; height: 15px; border-radius: 99px; background: var(--aw-accent); content: ""; }
 .agent-workspace .aw-detail-section h4 > span { margin-left: auto; padding: 4px 7px; border-radius: 999px; color: var(--aw-blue); background: var(--aw-tint); font-size: 9px; font-variant-numeric: tabular-nums; letter-spacing: 0; }
 .agent-workspace .aw-detail-section p { margin: 0; color: var(--aw-muted); font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
@@ -406,6 +441,17 @@ body[data-dash-theme="dark"] .agent-workspace .aw-suggestion,
 body[data-oi-theme="dark"] .agent-workspace .aw-suggestion { background: linear-gradient(145deg, rgb(34 44 55 / 99%), rgb(28 36 46 / 98%)); }
 body[data-dash-theme="dark"] .agent-workspace .aw-suggestion:hover,
 body[data-oi-theme="dark"] .agent-workspace .aw-suggestion:hover { background: linear-gradient(145deg, rgb(47 65 88 / 99%), rgb(40 66 91 / 96%)); }
+body:is([data-dash-theme="dark"], [data-oi-theme="dark"]) .agent-workspace .agent-attachment-dropzone { background: var(--aw-soft); border-color: var(--aw-line-strong); }
+body:is([data-dash-theme="dark"], [data-oi-theme="dark"]) .agent-workspace .agent-attachment-dropzone.is-dragging { background: var(--aw-tint); border-color: var(--aw-blue); }
+body:is([data-dash-theme="dark"], [data-oi-theme="dark"]) .agent-workspace .aw-suggestion-number { background: var(--aw-accent-soft); }
+body[data-dash-theme="dark"] .agent-workspace .aw-suggestion-new-feature,
+body[data-oi-theme="dark"] .agent-workspace .aw-suggestion-new-feature { border-color: rgb(237 155 153 / 32%); border-left-color: var(--aw-danger); background: linear-gradient(112deg, rgb(62 39 49 / 96%), rgb(28 36 46 / 98%)); box-shadow: var(--aw-card-shadow), inset 0 0 0 1px rgb(237 155 153 / 9%); }
+body[data-dash-theme="dark"] .agent-workspace .aw-suggestion-new-feature:hover,
+body[data-oi-theme="dark"] .agent-workspace .aw-suggestion-new-feature:hover { border-color: rgb(237 155 153 / 58%); border-left-color: var(--aw-danger); background: linear-gradient(112deg, rgb(78 46 58 / 98%), rgb(40 66 91 / 96%)); box-shadow: 0 24px 46px -30px rgb(237 155 153 / 18%), inset 0 1px 0 rgb(255 255 255 / 8%); }
+body[data-dash-theme="dark"] .agent-workspace .aw-suggestion-new-feature .aw-suggestion-number,
+body[data-oi-theme="dark"] .agent-workspace .aw-suggestion-new-feature .aw-suggestion-number { border-color: rgb(237 155 153 / 38%); color: var(--aw-danger); background: rgb(237 155 153 / 12%); }
+body[data-dash-theme="dark"] .agent-workspace .aw-suggestion-new,
+body[data-oi-theme="dark"] .agent-workspace .aw-suggestion-new { border-color: rgb(237 155 153 / 35%); color: #ffe1df; background: linear-gradient(135deg, rgb(142 68 80 / 92%), rgb(112 57 68 / 94%)); box-shadow: 0 8px 16px -12px rgb(237 155 153 / 54%); }
 body[data-dash-theme="dark"] .agent-workspace .aw-header-actions .aw-button,
 body[data-oi-theme="dark"] .agent-workspace .aw-header-actions .aw-button,
 body[data-dash-theme="dark"] .agent-workspace .agent-modern-logs > summary,
@@ -420,8 +466,12 @@ body[data-dash-theme="dark"] .agent-workspace .agent-modern-result-table thead t
 body[data-oi-theme="dark"] .agent-workspace .agent-modern-result-table thead th { background: rgb(39 49 61 / 82%); }
 
 /* 响应式：桌面保持分栏，窄屏退化成单列并保留可触控尺寸。 */
+@container (max-width: 560px) {
+  .agent-workspace .aw-suggestions { grid-template-columns: minmax(0, 1fr); }
+  .agent-workspace .aw-suggestion { min-height: 82px; }
+}
 @media (min-width: 1440px) {
-  .agent-workspace .aw-layout-with-details { grid-template-columns: minmax(0, 1fr) 326px; }
+  .agent-workspace .aw-layout-with-details { grid-template-columns: minmax(0, 1fr) 280px; }
 }
 @media (max-width: 1024px) {
   .agent-workspace .aw-layout { position: relative; }
@@ -437,12 +487,12 @@ body[data-oi-theme="dark"] .agent-workspace .agent-modern-result-table thead th 
   .agent-workspace .aw-new { margin-left: auto; }
   .agent-workspace .aw-conversation-bar { padding: 17px 20px 5px; }
   .agent-workspace .aw-log-content { padding: 12px 20px 27px; }
-  .agent-workspace .aw-welcome { padding-top: 42px; }
-  .agent-workspace .aw-welcome h3 { font-size: clamp(32px, 10vw, 46px); }
+  .agent-workspace .aw-welcome { padding-top: 12px; }
+  .agent-workspace .aw-welcome h3 { font-size: clamp(28px, 7vw, 36px); }
   .agent-workspace .aw-suggestions { grid-template-columns: 1fr; gap: 10px; }
-  .agent-workspace .aw-suggestion:first-child { grid-row: auto; min-height: 100px; }
+  .agent-workspace .aw-suggestion { min-height: 82px; }
   .agent-workspace .aw-message-user { max-width: 92%; }
-  .agent-workspace .aw-composer-area { width: 100%; padding: 14px 20px 18px; }
+  .agent-workspace .aw-composer-area { width: 100%; padding: 8px 20px 12px; }
   .agent-workspace .aw-composer { padding: 15px 14px 12px; border-radius: 21px; }
   .agent-workspace .aw-composer textarea { font-size: 16px; }
   .agent-workspace .aw-submit { min-height: 40px; }
@@ -458,6 +508,9 @@ body[data-oi-theme="dark"] .agent-workspace .agent-modern-result-table thead th 
   .agent-workspace .aw-details { width: min(100%, 350px); padding: 22px 20px; }
   .agent-workspace .aw-composer-toolbar { align-items: flex-end; }
   .agent-workspace .aw-composer-hint { max-width: 52%; line-height: 1.4; }
+  .agent-workspace .agent-attachment-dates { width: 100%; }
+  .agent-workspace .agent-attachment-date-label { flex: 1 1 150px; justify-content: space-between; }
+  .agent-workspace .agent-attachment-date-label input { flex: 1; }
   .agent-workspace .aw-progress-phases { gap: 6px; font-size: 9px; }
   .agent-workspace .aw-progress-phases span { padding-left: 11px; }
   .agent-workspace .agent-modern-result-metrics { gap: 7px; }

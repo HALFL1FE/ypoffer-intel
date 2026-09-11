@@ -10,11 +10,14 @@ import ChatbotCommandMenu from "../chatbot/ChatbotCommandMenu.vue";
 import ChatbotResultView from "../chatbot/ChatbotResultView.vue";
 import type { ChatbotReportViewResult } from "../chatbot/chatbotViewTypes";
 import AgentDiagnostics from "./AgentDiagnostics.vue";
+import AgentAttachment from "./AgentAttachment.vue";
 import { AGENT_COMMANDS, parseAgentCommand } from "./agentCommands";
 import { appendDiagnosticTurn, diagnosticTurn, type AgentDiagnosticTurn } from "./agentDiagnostics";
 import AgentTimeline from "./AgentTimeline.vue";
 import AgentResultView from "./AgentResultView.vue";
 import type { AgentSessionState, AgentViewSession } from "./agentSession";
+import { createAgentAttachmentStore, type AgentAttachmentStore, type AgentPromotionAttachment } from "./agentAttachment";
+import { readMerchantWorkbook } from "../../shared/import/merchantWorkbook";
 import { clearAgentViewSnapshot, loadAgentViewSnapshot, saveAgentViewSnapshot } from "./agentViewState";
 import {
   agentMemoryDisplayText,
@@ -39,6 +42,7 @@ export interface AgentRunRequest {
   readonly memory: AgentMemoryState;
   readonly memoryText: string;
   readonly signal: AbortSignal;
+  readonly promotionAttachment?: AgentPromotionAttachment;
   readonly onToken?: (token: string) => void;
   readonly onTimeline?: (step: AgentTimelineStep) => void;
   readonly onResultView?: (view: AgentResultViewModel) => void;
@@ -66,12 +70,20 @@ const props = withDefaults(defineProps<{
   readonly autoFocus?: boolean;
   readonly session?: AgentViewSession;
   readonly stateKey?: string;
+  readonly attachmentStore?: AgentAttachmentStore;
+  readonly readFile?: typeof readMerchantWorkbook;
 }>(), {
   storage: undefined,
   session: undefined,
   stateKey: "modern-agent",
-  autoFocus: true
+  autoFocus: true,
+  attachmentStore: undefined,
+  readFile: undefined
 });
+
+const attachmentStore = props.attachmentStore || createAgentAttachmentStore();
+const readFile = props.readFile || readMerchantWorkbook;
+const attachment = ref<AgentPromotionAttachment | null>(attachmentStore.get());
 
 const input = ref("");
 const messages = ref<Array<{ readonly id: string; readonly role: "user" | "assistant"; readonly content: string; readonly resultViews?: readonly AgentResultViewModel[]; readonly report?: ChatbotReportViewResult }>>([]);
@@ -107,6 +119,7 @@ let resizeObserver: ResizeObserver | undefined;
 let scrollFrame = 0;
 let abortController: AbortController | null = null;
 let stopSessionSubscription: (() => void) | null = null;
+let stopAttachmentSubscription: (() => void) | null = null;
 let idCounter = 0;
 
 const copy = computed(() => props.language === "zh" ? {
@@ -179,18 +192,28 @@ const copy = computed(() => props.language === "zh" ? {
   viewResults: "View results", readOnlyHint: "Read-only analysis · Your business data stays unchanged"
 });
 
-const suggestions = computed(() => props.language === "zh" ? [
-  { title: "了解一个商户", detail: "核心指标与表现", prompt: copy.value.example },
-  { title: "查询一个 ASIN", detail: "产品信息与月份表现", prompt: "查询 ASIN B0D2HKCMBP 的产品信息和月度表现" },
-  { title: "查看趋势变化", detail: "多月趋势与指标切换", prompt: "查看 Tapo（ID398679）最近 6 个月的收入、订单和 EPC 趋势" },
-  { title: "分析 Tier 商户", detail: "分层概览与商户列表", prompt: "分析 Tier 2 的整体表现，并列出商户及核心指标" },
-  { title: "核对付款状态", detail: "付款记录与待支付款项", prompt: "查询 Tapo（ID398679）的付款状态和未支付记录" }
+interface AgentSuggestion {
+  readonly key: string;
+  readonly title: string;
+  readonly detail: string;
+  readonly prompt: string;
+  readonly isNew?: boolean;
+}
+
+const suggestions = computed<AgentSuggestion[]>(() => props.language === "zh" ? [
+  { key: "merchant", title: "了解一个商户", detail: "核心指标与表现", prompt: copy.value.example },
+  { key: "asin", title: "查询一个 ASIN", detail: "产品信息与月份表现", prompt: "查询 ASIN B0D2HKCMBP 的产品信息和月度表现" },
+  { key: "trend", title: "查看趋势变化", detail: "多月趋势与指标切换", prompt: "查看 Tapo（ID398679）最近 6 个月的收入、订单和 EPC 趋势" },
+  { key: "tier", title: "分析 Tier 商户", detail: "分层概览与商户列表", prompt: "分析 Tier 2 的整体表现，并列出商户及核心指标" },
+  { key: "payments", title: "核对付款状态", detail: "付款记录与待支付款项", prompt: "查询 Tapo（ID398679）的付款状态和未支付记录" },
+  { key: "promotion-tracking", title: "推广追踪", detail: "按商家统计媒体数量", prompt: "上传推广清单后，按商家统计媒体数量，挑出前10个", isNew: true }
 ] : [
-  { title: "Explore a merchant", detail: "Key metrics and performance", prompt: copy.value.example },
-  { title: "Look up an ASIN", detail: "Product details and monthly performance", prompt: "Look up product details and monthly performance for ASIN B0D2HKCMBP" },
-  { title: "Follow a trend", detail: "Monthly trends and metric switching", prompt: "Show revenue, orders, and EPC trends for Tapo (ID398679) over the last 6 months" },
-  { title: "Analyze a tier", detail: "Tier overview and merchant list", prompt: "Analyze Tier 2 performance and list its merchants with key metrics" },
-  { title: "Check payments", detail: "Payment status and outstanding records", prompt: "Check payment status and unpaid records for Tapo (ID398679)" }
+  { key: "merchant", title: "Explore a merchant", detail: "Key metrics and performance", prompt: copy.value.example },
+  { key: "asin", title: "Look up an ASIN", detail: "Product details and monthly performance", prompt: "Look up product details and monthly performance for ASIN B0D2HKCMBP" },
+  { key: "trend", title: "Follow a trend", detail: "Monthly trends and metric switching", prompt: "Show revenue, orders, and EPC trends for Tapo (ID398679) over the last 6 months" },
+  { key: "tier", title: "Analyze a tier", detail: "Tier overview and merchant list", prompt: "Analyze Tier 2 performance and list its merchants with key metrics" },
+  { key: "payments", title: "Check payments", detail: "Payment status and outstanding records", prompt: "Check payment status and unpaid records for Tapo (ID398679)" },
+  { key: "promotion-tracking", title: "Track promotion", detail: "Count media by merchant", prompt: "After uploading a promotion list, rank the top 10 merchants by media count", isNew: true }
 ]);
 const moreSuggestions = computed(() => props.language === "zh" ? [
   { title: "品类分析", prompt: "分析 Electronics 品类的整体表现和核心指标" },
@@ -221,7 +244,7 @@ function trackScroll(): void {
   if (!log) return;
   followingLatest.value = log.scrollHeight - log.scrollTop - log.clientHeight < 96;
   const delta = log.scrollTop - lastScrollTop;
-  if (!input.value.trim() && messages.value.length && Math.abs(delta) > 10) {
+  if (runStatus.value !== "running" && !input.value.trim() && messages.value.length && Math.abs(delta) > 10) {
     composerCollapsed.value = !followingLatest.value;
     if (composerCollapsed.value) inputRef.value?.blur();
   }
@@ -265,6 +288,10 @@ function renderAssistant(content: string): string {
 
 function history(): readonly { readonly role: "user" | "assistant"; readonly content: string }[] {
   return messages.value.map(({ role, content }) => ({ role, content }));
+}
+
+function requiresPromotionWindow(prompt: string): boolean {
+  return /推送|推广|媒体|链接|成交|收入|销售额|订单|点击|表现|增长|promotion|publisher|link|purchased|revenue|sales|orders|clicks|performance|growth/i.test(prompt);
 }
 
 function downloadLogs(kind: "questions" | "feedback", format: "csv" | "jsonl"): void {
@@ -325,7 +352,14 @@ async function submit(): Promise<void> {
   const requestPrompt = command ? command.command.template(command.value, requestLanguage) : prompt;
   const initialHistory = replay?.history || (props.session && !localSessionOverride.value ? props.session.getState().history : history());
   const initialMemory = replay?.memory || memory.value;
-  const diagnosticRequest: AgentRunRequest = { prompt, language: requestLanguage, history: initialHistory, memory: initialMemory, memoryText: agentMemoryPromptText(initialMemory, requestLanguage), signal: new AbortController().signal };
+  const promotionAttachment = replay ? undefined : attachmentStore.get() || undefined;
+  if (promotionAttachment && requiresPromotionWindow(requestPrompt) && !promotionAttachment.manifest.window) {
+    error.value = requestLanguage === "zh"
+      ? "请先在上传清单卡片中确认推送日期，再查询推广表现。"
+      : "Confirm the launch date on the uploaded-list card before querying promotion performance.";
+    return;
+  }
+  const diagnosticRequest: AgentRunRequest = { prompt, language: requestLanguage, history: initialHistory, memory: initialMemory, memoryText: agentMemoryPromptText(initialMemory, requestLanguage), signal: new AbortController().signal, promotionAttachment };
   let attemptError = "";
   function recordAttempt(): void {
     const status = runStatus.value === "done" ? "done" : runStatus.value === "stopped" ? "stopped" : "error";
@@ -357,7 +391,8 @@ async function submit(): Promise<void> {
         language: requestLanguage,
         history: currentState.history,
         memoryText: agentMemoryPromptText(memory.value, props.language),
-        signal: abortController.signal
+        signal: abortController.signal,
+        promotionAttachment
       }, {
         onToken: (token) => {
           response.value += token;
@@ -411,6 +446,7 @@ async function submit(): Promise<void> {
       memory: initialMemory,
       memoryText: agentMemoryPromptText(initialMemory, requestLanguage),
       signal: abortController.signal,
+      promotionAttachment,
       onToken: (token) => { response.value += token; },
       onTimeline: (step) => {
         const normalized = normalizeAgentTimelineStep(step);
@@ -483,6 +519,7 @@ function newConversation(): void {
   diagnosticsOpen.value = false;
   composerCollapsed.value = false;
   activity?.clear();
+  attachmentStore.clear();
   localSessionOverride.value = false;
   followingLatest.value = true;
   nextTick(() => { logRef.value?.scrollTo?.({ top: 0, behavior: 'auto' }); });
@@ -535,6 +572,7 @@ onMounted(() => {
       error.value = restored.error;
     }
   }
+  stopAttachmentSubscription = attachmentStore.subscribe((next) => { attachment.value = next; });
   if (props.autoFocus) inputRef.value?.focus();
   resizeInput();
   if (typeof ResizeObserver !== "undefined" && logRef.value?.firstElementChild) {
@@ -567,6 +605,8 @@ onBeforeUnmount(() => {
   }
   stopSessionSubscription?.();
   stopSessionSubscription = null;
+  stopAttachmentSubscription?.();
+  stopAttachmentSubscription = null;
 });
 </script>
 
@@ -610,10 +650,12 @@ onBeforeUnmount(() => {
               <p v-if="copy.restored" class="aw-memory" role="status">{{ copy.restored }}</p>
               <div class="aw-task-heading">{{ copy.taskHint }}</div>
               <div class="aw-suggestions">
-                <button v-for="(suggestion, index) in suggestions" :key="index" class="aw-suggestion" type="button" :data-agent-action="index === 0 ? 'example' : 'suggestion'" @click="handleExample(suggestion.prompt)">
-                  <span class="aw-suggestion-number" aria-hidden="true">0{{ index + 1 }}</span>
-                  <span><strong>{{ suggestion.title }}</strong><small>{{ suggestion.detail }}</small></span>
-                  <span class="aw-suggestion-arrow" aria-hidden="true">↗</span>
+                <button v-for="(suggestion, index) in suggestions" :key="suggestion.key" class="aw-suggestion" :class="{ 'aw-suggestion-new-feature': suggestion.isNew }" type="button" :data-agent-action="index === 0 ? 'example' : 'suggestion'" :data-agent-example="suggestion.key" @click="handleExample(suggestion.prompt)">
+                  <span class="aw-suggestion-meta">
+                    <span class="aw-suggestion-number" aria-hidden="true">0{{ index + 1 }}</span>
+                    <span class="aw-suggestion-arrow" aria-hidden="true">↗</span>
+                  </span>
+                  <span class="aw-suggestion-copy"><strong><span>{{ suggestion.title }}</span><span v-if="suggestion.isNew" class="aw-suggestion-new" data-agent-badge="new">new</span></strong><small>{{ suggestion.detail }}</small></span>
                 </button>
               </div>
               <div class="aw-more-suggestions"><span>{{ copy.more }}</span><button v-for="suggestion in moreSuggestions" :key="suggestion.title" type="button" @click="handleExample(suggestion.prompt)">{{ suggestion.title }} <span aria-hidden="true">→</span></button></div>
@@ -660,6 +702,7 @@ onBeforeUnmount(() => {
           <div class="aw-composer-expandable" :inert="composerCollapsed || undefined">
           <form class="aw-composer" data-agent-form @submit.prevent="submit" @focusin="composerCollapsed = false">
             <ChatbotCommandMenu ref="commandMenu" :language="language" :input="input" :options="AGENT_COMMANDS" @select="chooseCommand" />
+            <AgentAttachment :language="language" :store="attachmentStore" :read-file="readFile" :busy="runStatus === 'running'" />
             <label class="aw-sr-only" :for="`${workspaceId}-input`">{{ copy.composer }}</label>
             <textarea :id="`${workspaceId}-input`" ref="inputRef" v-model="input" autocomplete="off" rows="2" :placeholder="copy.placeholder" :aria-expanded="commandMenu?.visible" :aria-controls="commandMenu?.visible ? commandMenu.menuId : undefined" :aria-activedescendant="commandMenu?.activeId" aria-autocomplete="list" data-agent-input @keydown="handleKeydown"></textarea>
             <p v-if="commandHint" class="aw-command-hint">{{ commandHint }}</p>

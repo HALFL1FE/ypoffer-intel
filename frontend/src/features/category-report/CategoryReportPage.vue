@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 
 import { translateMessage, type UiLanguage } from "../../shared/i18n";
+import { categoryName } from "../../shared/i18n/categoryNames";
 import {
   categoryKey,
   categoryPalette,
@@ -40,10 +41,78 @@ const category = useCategoryReport({
 const startDraft = ref(category.startDate.value);
 const endDraft = ref(category.endDate.value);
 const searchError = ref(false);
+const fullView = ref(false);
+const recordsPanel = ref<HTMLElement>();
+const fullViewButton = ref<HTMLButtonElement>();
+const recordsScroll = ref<HTMLElement>();
+let previousBodyOverflow = "";
 
-function message(key: string, fallback: string): string {
-  return translateMessage(props.language, key, fallback);
+async function toggleFullView(): Promise<void> {
+  const scrollTop = recordsScroll.value?.scrollTop ?? 0;
+  const scrollLeft = recordsScroll.value?.scrollLeft ?? 0;
+  if (!fullView.value) {
+    previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  } else {
+    document.body.style.overflow = previousBodyOverflow;
+  }
+  fullView.value = !fullView.value;
+  await nextTick();
+  fullViewButton.value?.focus({ preventScroll: true });
+  if (recordsScroll.value) {
+    recordsScroll.value.scrollTop = scrollTop;
+    recordsScroll.value.scrollLeft = scrollLeft;
+  }
 }
+
+function handleFullViewKey(event: KeyboardEvent): void {
+  if (!fullView.value) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    void toggleFullView();
+  } else if (event.key === "Tab") {
+    const items = Array.from(recordsPanel.value?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), [tabindex="0"]'
+    ) ?? []);
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !recordsPanel.value?.contains(document.activeElement))) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || !recordsPanel.value?.contains(document.activeElement))) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }
+}
+
+function message(key: string, fallback: string, values: Record<string, string | number> = {}): string {
+  return translateMessage(props.language, key, fallback, values);
+}
+
+function displayCategory(value: string): string {
+  return categoryName(value, props.language);
+}
+
+const searchOptions = computed(() => {
+  const entries = category.searchEntries.value;
+  const counts = new Map<string, number>();
+  entries.filter(entry => entry.type === "category").forEach(entry => {
+    const label = displayCategory(entry.value);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  });
+  return entries.map(entry => {
+    const label = entry.type === "category" ? displayCategory(entry.value) : entry.value;
+    return { ...entry, displayValue: entry.type === "category" && (counts.get(label) ?? 0) > 1
+      ? `${label}（${entry.value}）` : label };
+  });
+});
+const searchDisplay = computed(() => {
+  const selected = category.selection.value;
+  return selected?.value === category.searchDraft.value
+    ? searchOptions.value.find(entry => entry.value === selected.value)?.displayValue ?? category.searchDraft.value
+    : category.searchDraft.value;
+});
 
 const copy = computed(() => ({
   title: message("categoryReport.title", "Category"),
@@ -80,6 +149,9 @@ const copy = computed(() => ({
   allCategories: message("categoryReport.allCategories", "All categories"),
   tableKicker: message("categoryReport.tableKicker", "Record view"),
   tableTitle: message("categoryReport.tableTitle", "Category Records"),
+  fullView: message("categoryReport.fullView", "Full view"),
+  exitFullView: message("categoryReport.exitFullView", "Exit full view"),
+  merchantId: message("categoryReport.merchantId", "Merchant / ID"),
   tableHelp: message("categoryReport.tableHelp", "Performance by category · select a row to inspect merchants"),
   categoriesInView: message("categoryReport.categoriesInView", "categories in view"),
   export: message("categoryReport.export", "Export focused category"),
@@ -98,8 +170,8 @@ const sourceLabel = computed(() => category.source.value === "database"
 const searchStatus = computed(() => {
   if (searchError.value) return copy.value.searchInvalid;
   if (!category.searchDraft.value) return copy.value.searchAll;
-  if (category.selection.value?.type === "category") return "Showing category: " + category.selection.value.category;
-  if (category.selection.value?.type === "merchant") return "Showing merchant: " + category.selection.value.merchantName;
+  if (category.selection.value?.type === "category") return message("categoryReport.showingCategory", "Showing category: {category}", { category: displayCategory(category.selection.value.category || "") });
+  if (category.selection.value?.type === "merchant") return message("categoryReport.showingMerchant", "Showing merchant: {merchant}", { merchant: category.selection.value.merchantName || "" });
   return copy.value.searchHint;
 });
 const summaryCards = computed(() => [
@@ -108,14 +180,14 @@ const summaryCards = computed(() => [
   { key: "orders", label: copy.value.orders, value: formatCount(category.summary.value.orders) },
   { key: "cvr", label: copy.value.cvr, value: formatPercent(category.summary.value.clicks ? category.summary.value.orders / category.summary.value.clicks : null) }
 ]);
-const metricButtons: readonly { key: CategoryReportSortKey; label: string }[] = [
-  { key: "revenue", label: "Revenue" },
-  { key: "orders", label: "Orders" },
-  { key: "clicks", label: "Clicks" },
-  { key: "merchantCount", label: "Merchants" }
-];
+const metricButtons = computed<readonly { key: CategoryReportSortKey; label: string }[]>(() => [
+  { key: "revenue", label: copy.value.revenue },
+  { key: "orders", label: copy.value.orders },
+  { key: "clicks", label: copy.value.clicks },
+  { key: "merchantCount", label: copy.value.merchants }
+]);
 const selectedMetricLabel = computed(() =>
-  metricButtons.find((item) => item.key === category.sortKey.value)?.label || copy.value.revenue
+  metricButtons.value.find((item) => item.key === category.sortKey.value)?.label || copy.value.revenue
 );
 const firstSlice = computed(() => category.pieSlices.value[0] || null);
 
@@ -172,7 +244,10 @@ function metricShare(group: CategoryReportGroup): string {
 }
 
 function applySearch(): void {
-  searchError.value = !category.applySearch();
+  const draft = category.searchDraft.value.trim();
+  const rawEntry = category.searchEntries.value.find(entry => entry.value.toLowerCase() === draft.toLowerCase());
+  const localized = searchOptions.value.filter(entry => entry.displayValue.toLowerCase() === draft.toLowerCase());
+  searchError.value = !category.applySearch(rawEntry?.value ?? (localized.length === 1 ? localized[0]?.value ?? draft : draft));
 }
 
 function clearSearch(): void {
@@ -199,10 +274,13 @@ function exportSlice(): void {
 }
 
 onMounted(() => {
+  document.addEventListener("keydown", handleFullViewKey);
   if (props.autoLoad && props.loadTier) void category.loadSelectedTiers();
 });
 
 onUnmounted(() => {
+  document.removeEventListener("keydown", handleFullViewKey);
+  if (fullView.value) document.body.style.overflow = previousBodyOverflow;
   category.dispose();
 });
 </script>
@@ -259,7 +337,7 @@ onUnmounted(() => {
             data-category-action="search"
             type="search"
             list="category-report-options"
-            :value="category.searchDraft.value"
+            :value="searchDisplay"
             :placeholder="copy.searchPlaceholder"
             autocomplete="off"
             @input="category.setSearchDraft(($event.target as HTMLInputElement).value); searchError = false"
@@ -268,10 +346,10 @@ onUnmounted(() => {
           />
           <datalist id="category-report-options">
             <option
-              v-for="entry in category.searchEntries.value"
+              v-for="entry in searchOptions"
               :key="entry.type + ':' + entry.value"
-              :value="entry.value"
-              :label="entry.type === 'category' ? 'Category' : 'Merchant'"
+              :value="entry.displayValue"
+              :label="entry.type === 'category' ? entry.value : message('categoryReport.merchantOption', 'Merchant')"
             />
           </datalist>
           <small class="dashboard-category-search-status" :class="{ error: searchError }">
@@ -311,7 +389,7 @@ onUnmounted(() => {
             <span>{{ copy.allCategories }}</span>
           </button>
           <div class="category-pie-visual" :style="{ '--leader-color': firstSlice?.color || '#2f80ff' }">
-            <svg class="category-pie-svg" viewBox="0 0 100 100" role="img" :aria-label="selectedMetricLabel + ' mix by category'">
+            <svg class="category-pie-svg" viewBox="0 0 100 100" role="img" :aria-label="message('categoryReport.metricMix', '{metric} mix by category', { metric: selectedMetricLabel })">
               <circle class="category-pie-track" cx="50" cy="50" r="40" />
               <g transform="rotate(-90 50 50)">
                 <circle
@@ -327,25 +405,25 @@ onUnmounted(() => {
                   :stroke-dashoffset="slice.dashOffset.toFixed(4)"
                   :data-category-highlight="slice.key"
                   :data-category-focus="slice.key"
-                  :data-category-title="slice.label"
+                  :data-category-title="displayCategory(slice.label)"
                   tabindex="0"
                   role="button"
                   @click="category.setFocus(slice.key)"
                   @keydown.enter="category.setFocus(slice.key)"
                 >
-                  <title>{{ slice.label }}: {{ metricText(slice.group) }} / {{ (slice.share * 100).toFixed(1) }}%</title>
+                  <title>{{ displayCategory(slice.label) }}: {{ metricText(slice.group) }} / {{ (slice.share * 100).toFixed(1) }}%</title>
                 </circle>
               </g>
             </svg>
             <div class="category-pie-spotlight">
               <strong>{{ selectedMetricLabel }}</strong>
               <span>{{ firstSlice ? metricText(firstSlice.group) : "-" }}</span>
-              <small>{{ firstSlice ? firstSlice.label + " leads at " + (firstSlice.share * 100).toFixed(1) + "%" : "-" }}</small>
+              <small>{{ firstSlice ? message("categoryReport.leaderShare", "{category} leads at {share}%", { category: displayCategory(firstSlice.label), share: (firstSlice.share * 100).toFixed(1) }) : "-" }}</small>
             </div>
           </div>
           <div class="category-pie-copy">
-            <h4>{{ selectedMetricLabel }} mix by category</h4>
-            <p>{{ category.pieSlices.value.length }} categories from {{ category.selectedTierText.value }}.</p>
+            <h4>{{ message("categoryReport.metricMix", "{metric} mix by category", { metric: selectedMetricLabel }) }}</h4>
+            <p>{{ message("categoryReport.categoriesFrom", "{count} categories from {tiers}.", { count: category.pieSlices.value.length, tiers: category.selectedTierText.value }) }}</p>
             <ul class="category-pie-legend" aria-label="Category legend">
               <li
                 v-for="slice in category.pieSlices.value"
@@ -359,7 +437,7 @@ onUnmounted(() => {
                 @keydown.enter="category.setFocus(slice.key)"
               >
                 <span class="category-pie-swatch" aria-hidden="true" />
-                <strong>{{ slice.label }}</strong>
+                <strong>{{ displayCategory(slice.label) }}</strong>
                 <span>{{ metricText(slice.group) }} / {{ (slice.share * 100).toFixed(1) }}%</span>
               </li>
             </ul>
@@ -367,7 +445,7 @@ onUnmounted(() => {
               <button class="category-focus-export" data-category-action="export" type="button" :disabled="!props.download" :title="copy.exportHint" @click="exportSlice">
                 {{ copy.export }}
               </button>
-              <span>{{ firstSlice.label }}: {{ firstSlice.group.rowCount.toLocaleString() }} rows in selected tiers</span>
+              <span>{{ message("categoryReport.categoryRows", "{category}: {count} rows in selected tiers", { category: displayCategory(firstSlice.label), count: formatCount(firstSlice.group.rowCount) }) }}</span>
             </div>
           </div>
         </section>
@@ -393,7 +471,7 @@ onUnmounted(() => {
             </div>
             <ul class="category-preview-bars">
               <li v-for="group in category.visibleGroups.value.slice(0, 4)" :key="group.category" :style="{ '--category-color': categoryPalette(group.category).color }">
-                <span>{{ group.category }}</span>
+                <span>{{ displayCategory(group.category) }}</span>
                 <strong>{{ metricText(group) }}</strong>
                 <i aria-hidden="true"><b :style="{ width: Math.max(5, metricShare(group) === '-' ? 5 : parseFloat(metricShare(group))) + '%' }" /></i>
               </li>
@@ -402,7 +480,7 @@ onUnmounted(() => {
           <article v-if="category.visibleGroups.value[0]" class="category-idea-card category-idea-card-drawer" :style="{ '--category-color': categoryPalette(category.visibleGroups.value[0].category).color, '--category-tint': categoryPalette(category.visibleGroups.value[0].category).tint }">
             <div class="category-idea-heading">
               <span>{{ copy.drawer }}</span>
-              <strong>{{ category.visibleGroups.value[0].category }}</strong>
+              <strong>{{ displayCategory(category.visibleGroups.value[0].category) }}</strong>
             </div>
             <div class="category-drawer-preview">
               <dl>
@@ -431,23 +509,31 @@ onUnmounted(() => {
                 <span v-for="[tier, count] in tierEntries(category.visibleGroups.value[0])" :key="'label-' + tier" :style="{ '--tier-color': tierColor(tier) }"><i aria-hidden="true" />{{ tierLabel(tier) }} {{ formatCount(count) }}</span>
               </div>
             </div>
-            <p>{{ category.visibleGroups.value[0].category }} has {{ formatCount(category.visibleGroups.value[0].rowCount) }} sheet rows across the selected tiers.</p>
+            <p>{{ message("categoryReport.categoryRows", "{category}: {count} rows in selected tiers", { category: displayCategory(category.visibleGroups.value[0].category), count: formatCount(category.visibleGroups.value[0].rowCount) }) }}</p>
           </article>
         </section>
 
-        <section v-if="category.visibleGroups.value.length" class="dashboard-category-records" aria-labelledby="category-records-title">
+        <Teleport v-if="fullView || category.visibleGroups.value.length" to="body" :disabled="!fullView">
+        <div class="category-page-modern category-records-view" :class="{ 'is-full-view': fullView }" data-modern-root>
+        <section ref="recordsPanel" class="dashboard-category-records" :role="fullView ? 'dialog' : 'region'" :aria-modal="fullView ? 'true' : undefined" aria-labelledby="category-records-title">
           <div class="dashboard-category-table-toolbar">
             <div class="dashboard-category-table-heading">
               <span class="dashboard-category-table-kicker">{{ copy.tableKicker }}</span>
               <h3 id="category-records-title">{{ copy.tableTitle }}</h3>
               <p>{{ copy.tableHelp }}</p>
             </div>
+            <div class="dashboard-category-table-actions">
             <div class="dashboard-category-table-meta" data-category-table-count>
               <strong>{{ formatCount(category.visibleGroups.value.length) }}</strong>
               <span>{{ copy.categoriesInView }}</span>
             </div>
+            <button ref="fullViewButton" class="category-full-view-button" type="button" :aria-expanded="fullView" @click="toggleFullView">
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path :d="fullView ? 'M9 3v6H3m18 0h-6V3M3 15h6v6m6 0v-6h6' : 'M9 3H3v6m12-6h6v6M3 15v6h6m6 0h6v-6'" /></svg>
+              {{ fullView ? copy.exitFullView : copy.fullView }}
+            </button>
+            </div>
           </div>
-          <div class="table-wrap tier-category-table-wrap dashboard-category-table-wrap">
+          <div ref="recordsScroll" class="table-wrap tier-category-table-wrap dashboard-category-table-wrap" tabindex="0" :aria-label="copy.tableTitle">
             <table class="sheet-table tier-category-table dashboard-category-report-table">
             <thead>
               <tr>
@@ -471,6 +557,7 @@ onUnmounted(() => {
               </tr>
             </thead>
             <tbody>
+              <tr v-if="!category.visibleGroups.value.length"><td colspan="10">{{ copy.noRows }}</td></tr>
               <template v-for="group in category.visibleGroups.value" :key="group.category">
                 <tr
                   class="dashboard-category-row"
@@ -478,14 +565,16 @@ onUnmounted(() => {
                   data-category-action="toggle-expanded"
                   :data-category-highlight="categoryKey(group.category)"
                   tabindex="0"
+                  :aria-expanded="category.expandedKey.value === categoryKey(group.category)"
                   @click="category.toggleExpanded(categoryKey(group.category))"
                   @keydown.enter="category.toggleExpanded(categoryKey(group.category))"
+                  @keydown.space.prevent="category.toggleExpanded(categoryKey(group.category))"
                 >
                   <td>
                     <span class="category-expand-chevron" aria-hidden="true">›</span>
-                    <strong class="category-name-chip" :style="{ '--category-color': categoryPalette(group.category).color, '--category-tint': categoryPalette(group.category).tint }">
+                    <strong class="category-name-chip" :title="group.category" :style="{ '--category-color': categoryPalette(group.category).color, '--category-tint': categoryPalette(group.category).tint }">
                       <span class="category-dot" aria-hidden="true" />
-                      {{ group.category }}
+                      {{ displayCategory(group.category) }}
                     </strong>
                     <span class="category-rank-bar" aria-hidden="true"><span :style="{ width: Math.max(4, group.revenue / Math.max(...category.visibleGroups.value.map((item) => item.revenue), 1) * 100) + '%', '--category-color': categoryPalette(group.category).color }" /></span>
                   </td>
@@ -498,7 +587,7 @@ onUnmounted(() => {
                   <td>{{ formatMoney(group.avgAov) }}</td>
                   <td>{{ group.previewMerchants || "-" }}</td>
                   <td>
-                    <div class="category-tier-mix" :aria-label="group.category + ' tier mix'">
+                    <div class="category-tier-mix" :aria-label="message('categoryReport.categoryTierMix', '{category} tier mix', { category: displayCategory(group.category) })">
                       <div class="category-tier-mix-bar" aria-hidden="true">
                         <span v-for="[tier, count] in tierEntries(group)" :key="tier" :style="{ width: (count / group.rowCount * 100).toFixed(2) + '%', '--tier-color': tierColor(tier) }" />
                       </div>
@@ -512,7 +601,7 @@ onUnmounted(() => {
                   <td colspan="10">
                     <div class="category-detail-scroll">
                       <table class="category-detail-inner-table">
-                        <thead><tr><th>Merchant / ID</th><th>Tier</th><th>Revenue</th><th>Orders</th><th>Clicks</th><th>EPC</th><th>CVR</th><th>AOV</th></tr></thead>
+                        <thead><tr><th>{{ copy.merchantId }}</th><th>Tier</th><th>{{ copy.revenue }}</th><th>{{ copy.orders }}</th><th>{{ copy.clicks }}</th><th>EPC</th><th>CVR</th><th>AOV</th></tr></thead>
                         <tbody>
                           <tr v-for="row in group.rows" :key="'detail-' + row.key" class="category-detail-merchant-row">
                             <td><strong>{{ row.merchantName || "-" }}</strong><br /><small>{{ row.merchantId || "-" }}</small></td>
@@ -534,6 +623,8 @@ onUnmounted(() => {
             </table>
           </div>
         </section>
+        </div>
+        </Teleport>
         <p v-else class="category-report-empty">{{ copy.noRows }}</p>
       </div>
     </section>

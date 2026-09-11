@@ -11,6 +11,16 @@ import math
 import re
 from typing import Any
 
+from agent_promotion_contract import (
+    PROMOTION_MAX_ROWS,
+    PROMOTION_METRICS,
+    PROMOTION_RESULT_FIELDS,
+    PROMOTION_SORTS,
+    PROMOTION_VIEWS,
+    validate_promotion_arguments,
+    validate_promotion_result,
+)
+
 
 AGENT_CONTRACT_VERSION = "v2"
 AGENT_TOOL_REGISTRY_VERSION = "agent-tools-v1"
@@ -23,6 +33,7 @@ AGENT_TOOL_NAMES = (
     "payment_status",
     "trend",
     "asin_analysis",
+    "promotion_analysis",
 )
 AGENT_TIER_NAMES = ("Tier 1", "Tier 2", "Tier 3", "Tier 4", "BLACK TIER")
 AGENT_PAYMENT_STATUSES = ("paid", "pending", "unpaid", "overdue", "partial")
@@ -75,6 +86,7 @@ AGENT_RESULT_FIELDS = {
         "asins", "rows", "monthly", "notFound", "headline", "note",
         "source", "dataAsOf",
     ),
+    "promotion_analysis": tuple(PROMOTION_RESULT_FIELDS),
 }
 
 _UNSAFE_KEYS = {"__proto__", "constructor", "prototype"}
@@ -296,6 +308,27 @@ def _build_specs() -> dict[str, dict[str, Any]]:
             },
             "argument_fields": ("asins",),
         },
+        "promotion_analysis": {
+            "description_zh": "基于用户上传的商家清单，查询推广前后商家、按商家统计媒体数量、媒体、链接、品类或历史表现；没有上传清单时不要调用。",
+            "description_en": "Analyze merchant performance, count distinct active publishers per merchant, or inspect publisher, link, category, or history performance for an uploaded merchant list; do not call without an uploaded list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "attachmentId": _text_property("当前上传清单的附件 ID。", "The current uploaded list attachment ID.", 128),
+                    "view": {"type": "string", "enum": list(PROMOTION_VIEWS)},
+                    "merchantIds": {"type": "array", "items": {"type": "string", "pattern": r"^[1-9]\d{0,12}$", "maxLength": 13}, "minItems": 1, "maxItems": 200},
+                    "window": {"type": ["object", "null"]},
+                    "metric": {"type": "string", "enum": list(PROMOTION_METRICS), "default": "revenue"},
+                    "sortBy": {"type": "string", "enum": list(PROMOTION_SORTS), "default": "after"},
+                    "direction": {"type": "string", "enum": ["asc", "desc"], "default": "desc"},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 10000, "default": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": PROMOTION_MAX_ROWS, "default": PROMOTION_MAX_ROWS},
+                },
+                "required": ["attachmentId", "view"],
+                "additionalProperties": False,
+            },
+            "argument_fields": ("attachmentId", "view", "merchantIds", "window", "metric", "sortBy", "direction", "offset", "limit"),
+        },
     }
 
 
@@ -392,6 +425,11 @@ def validate_tool_arguments(tool_name: str, arguments: object) -> tuple[dict | N
         if error:
             return None, error
         cleaned["asins"] = asins
+    elif tool_name == "promotion_analysis":
+        cleaned, error = validate_promotion_arguments(arguments)
+        if error:
+            return None, error
+        return cleaned, None
     elif tool_name == "payment_status":
         if not arguments:
             return None, _error("invalid_arguments", "arguments")
@@ -512,6 +550,19 @@ def validate_tool_result(tool_name: str, result: object) -> tuple[dict | None, d
         data = result.get("data", {})
         if not isinstance(data, dict):
             return None, _error("invalid_tool_result", "data")
+        if tool_name == "promotion_analysis":
+            data, data_error = validate_promotion_result(data)
+            if data_error:
+                return None, data_error
+            normalized["data"] = data
+            maximum = 18000
+            try:
+                encoded = json.dumps(normalized, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            except (TypeError, ValueError):
+                return None, _error("invalid_tool_result", "result")
+            if len(encoded) > maximum:
+                return None, _error("invalid_tool_result", "result")
+            return normalized, None
         field_names = set(AGENT_RESULT_FIELDS[tool_name])
         if any(key not in field_names or key in _UNSAFE_KEYS for key in data):
             return None, _error("invalid_tool_result", "data")
