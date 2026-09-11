@@ -39,7 +39,7 @@ export interface MediaRow {
   publisherName: string;
   before: Metrics;
   after: Metrics;
-  linkType: "asin" | "storefront" | "unknown";
+  linkType: "asin" | "product" | "storefront" | "unknown";
   asin: string;
   purchasedAsin: string;
 }

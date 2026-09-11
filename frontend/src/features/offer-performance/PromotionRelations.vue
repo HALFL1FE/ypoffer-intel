@@ -101,12 +101,16 @@ const target = (r: MediaRow) =>
   r.asin ||
   (r.linkType === "storefront"
     ? "Storefront"
+    : r.linkType === "product"
+      ? t("单品链接（未提供 ASIN）", "Product link (ASIN unavailable)")
     : r.purchasedAsin || t("目标未识别", "Unknown target"));
 const evidence = (r: MediaRow) =>
   r.asin
     ? t("推广 ASIN", "Promoted ASIN")
     : r.linkType === "storefront"
       ? t("店铺推广链接", "Storefront link")
+      : r.linkType === "product"
+        ? t("单品链接 · 未提供 ASIN", "Product link · ASIN unavailable")
       : r.purchasedAsin
         ? t("成交 ASIN · 推广链接未知", "Purchased ASIN · destination unknown")
         : t("记录未提供目标", "No target evidence");
@@ -384,7 +388,7 @@ watch(
                       ><small
                         v-if="
                           r.purchasedAsin &&
-                          (r.asin || r.linkType === 'storefront')
+                          (r.asin || r.linkType === 'storefront' || r.linkType === 'product')
                         "
                         >{{ t("成交", "Purchased") }}
                         {{ r.purchasedAsin }}</small

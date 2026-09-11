@@ -160,6 +160,8 @@ WHERE o.user_id IS NOT NULL AND o.user_id > 0
 
 # 查询每个 publisher 的链接类型（product / storefront）
 # Amazon 商品链接的常见模式：/dp/ASIN, /gp/product/ASIN, /exec/obidos/ASIN, &asin= 参数
+LINK_TYPE_RESULT_KEY = "detected_link_type"
+
 LINK_TYPE_SQL = f"""
 SELECT
   o.user_id,
@@ -170,7 +172,7 @@ SELECT
     WHEN a.advert_url_real LIKE '%%&asin=%%' THEN 'product'
     WHEN a.advert_url_real LIKE '%%?asin=%%' THEN 'product'
     ELSE 'storefront'
-  END AS link_type,
+  END AS {LINK_TYPE_RESULT_KEY},
   SUM(o.clicks) AS clicks,
   SUM(o.detail_page_views) AS dpv,
   SUM(o.add_to_carts) AS atc,
@@ -181,7 +183,7 @@ SELECT
 FROM cnpscy_amazon_order o
 LEFT JOIN {_ADVERT_SUBQ} a ON o.advert_id = a.advert_id
 WHERE o.user_id IS NOT NULL AND o.user_id > 0
-GROUP BY o.user_id, link_type
+GROUP BY o.user_id, {LINK_TYPE_RESULT_KEY}
 """
 
 # 查询每个 publisher 关联的 merchant 轻量索引。
@@ -267,7 +269,7 @@ def build_publishers_payload() -> dict:
         link_types_by_user: dict[int, dict[str, dict]] = {}
         for lr in link_type_rows:
             uid = int(lr["user_id"])
-            lt = str(lr["link_type"]).strip()
+            lt = str(lr[LINK_TYPE_RESULT_KEY]).strip()
             if lt:
                 if uid not in link_types_by_user:
                     link_types_by_user[uid] = {}

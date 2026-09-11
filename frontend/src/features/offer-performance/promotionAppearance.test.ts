@@ -16,6 +16,7 @@ describe("promotion visual identities", () => {
     expect(linkKind({ asin: "", linkType: "unknown" })).toBe("unknown");
     expect(linkKind({ asin: "B012345678", linkType: "asin" })).toBe("asin");
     expect(linkKind({ asin: "", linkType: "storefront" })).toBe("storefront");
+    expect(linkKind({ asin: "", linkType: "product" })).toBe("asin");
   });
   it("classifies only promoted ASINs against the exact merchant list", () => {
     const offer = {
