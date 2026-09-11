@@ -77,12 +77,23 @@ def assert_close(actual, expected, label):
         raise AssertionError(f"{label}: expected {expected!r}, got {actual!r}")
 
 
+def assert_link_type_query_uses_unambiguous_alias():
+    alias = build_publishers_data.LINK_TYPE_RESULT_KEY
+    sql = build_publishers_data.LINK_TYPE_SQL
+    assert_equal(alias, "detected_link_type", "link type SQL result alias")
+    assert_equal(f"END AS {alias}" in sql, True, "link type SQL select alias")
+    assert_equal(f"GROUP BY o.user_id, {alias}" in sql, True, "link type SQL group alias")
+    assert_equal("GROUP BY o.user_id, link_type" in sql, False, "ambiguous link type grouping")
+
+
 @contextmanager
 def fake_connection():
     yield object()
 
 
 def main():
+    assert_link_type_query_uses_unambiguous_alias()
+
     by_user, name_map = offer_db.publisher_portfolios_from_rows(ROWS)
     merchants = by_user[7]
     alpha = merchants[0]

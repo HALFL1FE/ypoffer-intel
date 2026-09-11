@@ -61,6 +61,8 @@ def target_identity(row):
         asin = match.group(1).upper() if match else ""
     if asin:
         return "asin", asin
+    if kind in {"product", "product_link"}:
+        return "product", ""
     if kind in {"storefront", "store", "brand_store"} or re.search(r"/(?:stores|shop)/", url, re.I):
         return "storefront", ""
     return "unknown", ""

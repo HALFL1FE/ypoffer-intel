@@ -67,7 +67,11 @@ export const LINK_KINDS: readonly LinkKind[] = [
   "unknown",
 ];
 export const linkKind = (row: Pick<MediaRow, "asin" | "linkType">): LinkKind =>
-  row.asin ? "asin" : row.linkType === "storefront" ? "storefront" : "unknown";
+  row.asin || row.linkType === "asin" || row.linkType === "product"
+    ? "asin"
+    : row.linkType === "storefront"
+      ? "storefront"
+      : "unknown";
 export function linkLabel(kind: LinkKind, language: UiLanguage) {
   return kind === "asin"
     ? language === "zh"
