@@ -207,19 +207,19 @@ interface AgentSuggestion {
 }
 
 const suggestions = computed<AgentSuggestion[]>(() => props.language === "zh" ? [
-  { key: "merchant", title: "了解一个商户", detail: "核心指标与表现", prompt: copy.value.example },
-  { key: "asin", title: "查询一个 ASIN", detail: "产品信息与月份表现", prompt: "查询 ASIN B0D2HKCMBP 的产品信息和月度表现" },
-  { key: "trend", title: "查看趋势变化", detail: "多月趋势与指标切换", prompt: "查看 Tapo（ID398679）最近 6 个月的收入、订单和 EPC 趋势" },
-  { key: "tier", title: "分析 Tier 商户", detail: "分层概览与商户列表", prompt: "分析 Tier 2 的整体表现，并列出商户及核心指标" },
-  { key: "payments", title: "核对付款状态", detail: "付款记录与待支付款项", prompt: "查询 Tapo（ID398679）的付款状态和未支付记录" },
-  { key: "promotion-tracking", title: "推广追踪", detail: "按商家统计媒体数量", prompt: "上传推广清单后，按商家统计媒体数量，挑出前10个", isNew: true }
+  { key: "merchant", title: "了解一个商户", detail: "核心指标与表现", prompt: "/merchant Tapo" },
+  { key: "asin", title: "查询一个 ASIN", detail: "产品信息与月份表现", prompt: "/asin B0D2HKCMBP" },
+  { key: "trend", title: "查看趋势变化", detail: "多月趋势与指标切换", prompt: "/trend Tapo（ID398679）最近 6 个月的收入、订单和 EPC 趋势" },
+  { key: "tier", title: "分析 Tier 商户", detail: "分层概览与商户列表", prompt: "/tier Tier 2" },
+  { key: "payments", title: "核对付款状态", detail: "付款记录与待支付款项", prompt: "/payment Tapo（ID398679）" },
+  { key: "promotion-tracking", title: "推广追踪", detail: "按商家统计媒体数量", prompt: "/promotion 按商家统计媒体数量", isNew: true }
 ] : [
-  { key: "merchant", title: "Explore a merchant", detail: "Key metrics and performance", prompt: copy.value.example },
-  { key: "asin", title: "Look up an ASIN", detail: "Product details and monthly performance", prompt: "Look up product details and monthly performance for ASIN B0D2HKCMBP" },
-  { key: "trend", title: "Follow a trend", detail: "Monthly trends and metric switching", prompt: "Show revenue, orders, and EPC trends for Tapo (ID398679) over the last 6 months" },
-  { key: "tier", title: "Analyze a tier", detail: "Tier overview and merchant list", prompt: "Analyze Tier 2 performance and list its merchants with key metrics" },
-  { key: "payments", title: "Check payments", detail: "Payment status and outstanding records", prompt: "Check payment status and unpaid records for Tapo (ID398679)" },
-  { key: "promotion-tracking", title: "Track promotion", detail: "Count media by merchant", prompt: "After uploading a promotion list, rank the top 10 merchants by media count", isNew: true }
+  { key: "merchant", title: "Explore a merchant", detail: "Key metrics and performance", prompt: "/merchant Tapo" },
+  { key: "asin", title: "Look up an ASIN", detail: "Product details and monthly performance", prompt: "/asin B0D2HKCMBP" },
+  { key: "trend", title: "Follow a trend", detail: "Monthly trends and metric switching", prompt: "/trend Tapo (ID398679) over the last 6 months for revenue, orders, and EPC" },
+  { key: "tier", title: "Analyze a tier", detail: "Tier overview and merchant list", prompt: "/tier Tier 2" },
+  { key: "payments", title: "Check payments", detail: "Payment status and outstanding records", prompt: "/payment Tapo (ID398679)" },
+  { key: "promotion-tracking", title: "Track promotion", detail: "Count media by merchant", prompt: "/promotion rank the top 10 merchants by media count", isNew: true }
 ]);
 const moreSuggestions = computed(() => props.language === "zh" ? [
   { title: "品类分析", prompt: "分析 Electronics 品类的整体表现和核心指标" },

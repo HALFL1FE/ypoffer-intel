@@ -53,7 +53,17 @@ describe("AgentPage", () => {
     expect(promotionSuggestion.get('[data-agent-badge="new"]').text()).toBe("new");
 
     await promotionSuggestion.trigger("click");
-    expect((wrapper.get('[data-agent-input]').element as HTMLTextAreaElement).value).toContain("按商家统计媒体数量");
+    expect((wrapper.get('[data-agent-input]').element as HTMLTextAreaElement).value).toBe("/promotion 按商家统计媒体数量");
+    wrapper.unmount();
+  });
+
+  it("点击 ASIN 示例卡片时预填对应斜杠命令和示例参数", async () => {
+    const wrapper = mount(AgentPage, {
+      props: { language: "en", run: vi.fn(), autoFocus: false }
+    });
+
+    await wrapper.get('[data-agent-example="asin"]').trigger("click");
+    expect((wrapper.get('[data-agent-input]').element as HTMLTextAreaElement).value).toBe("/asin B0D2HKCMBP");
     wrapper.unmount();
   });
 
