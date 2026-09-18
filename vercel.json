@@ -338,7 +338,7 @@
     "api/db/index.py": {
       "excludeFiles": "{.git/**,.github/**,frontend/**,data/**,docs/**,output/**,public/**,scripts/**,*.md,*.txt,*.yml,init.sh,server.py}",
       "includeFiles": "protected_data/**",
-      "maxDuration": 60
+      "maxDuration": 180
     },
     "api/levanta/payments.py": {
       "excludeFiles": "{.git/**,.github/**,frontend/**,data/**,docs/**,output/**,public/**,scripts/**,protected_data/db_keywords_cache.json,protected_data/db_publishers_cache.json,protected_data/offer_promotion_batches.json,*.md,*.txt,*.yml,init.sh,server.py}",

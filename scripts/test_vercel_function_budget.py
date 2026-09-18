@@ -134,7 +134,7 @@ def main():
         "api/copilotkit/[...path].js": {"maxDuration": 60},
         "api/db/index.py": {
             "excludeFiles": common_excludes,
-            "maxDuration": 60,
+            "maxDuration": 180,
             "includeFiles": "protected_data/**",
         },
         "api/levanta/payments.py": {

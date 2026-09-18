@@ -45,6 +45,8 @@ jobs:
 
       - name: Run regression tests
         run: |
+          python -m pip install openpyxl==3.1.5
+          python scripts/test_offer_review.py
           python scripts/test_auth_helpers.py
           python scripts/test_vercel_function_budget.py
           python scripts/test_vercel_db_wsgi.py
