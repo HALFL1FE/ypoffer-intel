@@ -72,6 +72,8 @@ def target_identity(row):
     asin = str(row.get("target_asin") or "").strip().upper()
     url = str(row.get("target_url") or "").strip()
     kind = str(row.get("link_type") or "").strip().lower()
+    if kind in {"storefront", "store", "brand_store"}:
+        return "storefront", ""
     if not re.fullmatch(r"B[A-Z0-9]{9}", asin):
         match = re.search(r"(?:/dp/|/gp/product/|[?&]asin=)(B[A-Z0-9]{9})(?:[/?&#]|$)", url, re.I)
         asin = match.group(1).upper() if match else ""
@@ -92,7 +94,7 @@ def _latest_date(conn, table, columns):
     return db.normalize_day(latest[0].get("latest")) if latest else None
 
 
-def _read(conn, table, columns, ids, start, end, fields, detail=False, monthly=False, period_window=None, known_watermark=None, report_window=None):
+def _read(conn, table, columns, ids, start, end, fields, detail=False, monthly=False, period_window=None, known_watermark=None, report_window=None, currency=None):
     merchant = db.pick_column(columns, ["advert_id", "merchant_id"])
     day = db.pick_column(columns, ["order_time_day", "time_day", "click_time_day", "order_date", "date"])
     if not merchant or not day:
@@ -115,7 +117,7 @@ def _read(conn, table, columns, ids, start, end, fields, detail=False, monthly=F
     if detail:
         for alias, candidates in {
             "publisherId": ["user_id", "publisher_id", "media_id"],
-            "target_asin": ["promoted_asin", "target_asin", "link_asin"],
+            "target_asin": ["promoted_asin", "target_asin", "link_asin"] + (["asin"] if table == "cnpscy_amazon_click" else []),
             "target_url": ["tracking_url", "destination_url", "target_url", "link_url"],
             "link_type": ["link_type", "linkType"],
             "purchasedAsin": ["asin", "product_asin", "item_asin", "amazon_asin"] if table == "cnpscy_amazon_order" else [],
@@ -126,6 +128,12 @@ def _read(conn, table, columns, ids, start, end, fields, detail=False, monthly=F
             if column:
                 group.append(expr)
     placeholders = ",".join(["%s"] * len(ids))
+    currency_filter = ""
+    if currency and table == "cnpscy_amazon_order":
+        currency_col = db.pick_column(columns, ["currency", "currency_code"])
+        if not currency_col:
+            raise ValueError("Currency column is required for USD review reporting")
+        currency_filter = f"AND r.{db.q(currency_col)} = 'USD' "
     bounds = period_window or report_window
     # Exclude the gap before grouping: it must never become comparison revenue.
     gap_filter = ""
@@ -135,7 +143,7 @@ def _read(conn, table, columns, ids, start, end, fields, detail=False, monthly=F
         gap_filter = f"AND ({date_expr} <= {before_end} OR {date_expr} >= {after_start}) "
     rows = db.fetch_all(conn, f"SELECT {', '.join(select)} FROM {db.q(table)} r "
                         f"WHERE r.{db.q(merchant)} IN ({placeholders}) AND {date_expr} BETWEEN %s AND %s "
-                        f"{gap_filter}GROUP BY {', '.join(group)} LIMIT 25001",
+                        f"{gap_filter}{currency_filter}GROUP BY {', '.join(group)} LIMIT 25001",
                         (*ids, int(start.replace("-", "")), int(end.replace("-", ""))))
     if len(rows) > 25000:
         raise ValueError("Too many detail rows; choose a shorter date range")
@@ -209,8 +217,14 @@ def summarize_details(rows, window, supported, watermark):
             purchased = ""
         for bucket, key in ((media, (mid, uid)), (links, (mid, uid, kind, asin, purchased))):
             item = bucket.setdefault(key, {"merchantId": mid, "publisherId": uid, "linkType": kind, "asin": asin, "purchasedAsin": purchased,
-                                          "before": _empty({}), "after": _empty({})})
+                                          "before": _empty(supported if bucket is media else {}), "after": _empty(supported if bucket is media else {}), "daily": []})
             _add(item[period], row, supported)
+            if bucket is media:
+                daily = next((d for d in item["daily"] if d["date"] == day), None)
+                if daily is None:
+                    daily = {"date": day, **_empty(supported)}
+                    item["daily"].append(daily)
+                _add(daily, row, supported)
     for item in list(media.values()) + list(links.values()):
         _mask_pending(item, window, watermark)
     return list(media.values()), list(links.values())
@@ -254,6 +268,8 @@ def report(query):
                 raise RuntimeError("Reporting sources have no dated records")
             safe_end = (db.reporting_today() - dt.timedelta(days=db.DEFAULT_REPORTING_DELAY_DAYS)).isoformat()
             relation_options = {"period_window": window, "known_watermark": min(*source_dates, safe_end)}
+        if value("currency") == "USD":
+            relation_options["currency"] = "USD"
         order_fields = {k: v for k, v in ORDER_FIELDS.items() if k != "clicks" or not has_clicks}
         rows, supported, order_watermark = _read(conn, "cnpscy_amazon_order", order_cols, ids, window["beforeStart"], window["endDate"], order_fields, include_relations, **relation_options)
         if not supported.get("revenue"):
@@ -273,8 +289,8 @@ def report(query):
         safe_end = (db.reporting_today() - dt.timedelta(days=db.DEFAULT_REPORTING_DELAY_DAYS)).isoformat()
         watermark = min(watermark, safe_end) if watermark else safe_end
         history = []
-        if not include_relations:
-            history, _, _ = _read(conn, "cnpscy_amazon_order", order_cols, ids, months[0] + "-01", history_end, order_fields, monthly=True)
+        if not include_relations and value("skipHistory") != "1":
+            history, _, _ = _read(conn, "cnpscy_amazon_order", order_cols, ids, months[0] + "-01", history_end, order_fields, monthly=True, **({"currency": "USD"} if value("currency") == "USD" else {}))
             if has_clicks:
                 hclicks, _, _ = _read(conn, "cnpscy_amazon_click", click_cols, ids, months[0] + "-01", history_end, {"clicks": ["click", "clicks"]}, monthly=True)
                 history += hclicks
@@ -288,6 +304,9 @@ def report(query):
             for merchant in result["merchants"]:
                 merchant["monthly"] = []
             media, links = summarize_details(rows, window, supported, watermark)
+            if cohort_relations:
+                for item in media:
+                    item["daily"] = []
             user_ids = [uid for uid in {x["publisherId"] for x in media} if uid.isdigit() and int(uid) > 0]
             names = {}
             if user_ids:

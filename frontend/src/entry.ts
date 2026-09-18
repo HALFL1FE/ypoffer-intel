@@ -609,7 +609,15 @@ const offerPerformanceFactory: ModernPageFactory = (element): ModernPageControll
   const app = createApp({ setup: () => () => h(OfferPerformancePage, {
     language: i18n.language.value,
     readFile: readMerchantWorkbook,
-    download: (rows: Record<string, unknown>[]) => { downloadWorkbook("offer-promotion-comparison.xlsx", { rows, columns: objectExportColumns(rows) }); }
+    download: (rows: Record<string, unknown>[]) => {
+      if (rows.some(row => row.RecordType)) {
+        const types = [...new Set(rows.map(row => String(row.RecordType || 'summary')))];
+        downloadWorkbook("offer-media-review.xlsx", { sheets: types.map(type => {
+          const records = rows.filter(row => String(row.RecordType || 'summary') === type);
+          return { sheetName: type, rows: records, columns: objectExportColumns(records), freezeHeader: true, wrapText: true };
+        }) });
+      } else downloadWorkbook("offer-promotion-comparison.xlsx", { rows, columns: objectExportColumns(rows) });
+    }
   }) });
   app.mount(element);
   return { setLanguage: language => i18n.setLanguage(language), unmount: () => { app.unmount(); element.replaceChildren(); } };

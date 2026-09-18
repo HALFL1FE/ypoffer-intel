@@ -4,6 +4,7 @@ import json
 import logging
 
 from offer_performance import report as offer_performance_report
+from offer_review import handle_request as handle_offer_review
 from auth import _read_json_body, current_user_for_target, require_page_access
 from google_ads_workbench import (
     DEFAULT_WORKBENCH_USER_ID,
@@ -550,6 +551,8 @@ def app(environ, start_response):
                 handle_ui_tier1_merchants(target, query, method)
             elif route == "ui-monthly-new-merchants":
                 handle_ui_monthly_new_merchants(target, query, method)
+            elif route == "ui-offer-performance" and (method == "POST" or first_query_value(query, "action") == "review-catalog"):
+                handle_offer_review(target, method, query)
             elif method != "GET":
                 send_json(target, 405, {"ok": False, "error": "Method not allowed"})
             elif route == "ui-status":
