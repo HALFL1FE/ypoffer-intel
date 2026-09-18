@@ -33,6 +33,7 @@ _load_dotenv()
 # ------------------------------------
 
 from offer_performance import report as offer_performance_report
+from offer_review import handle_request as handle_offer_review
 from api.tier_moves import handle_tier_moves
 from auth import (
     current_user_for_target,
@@ -263,6 +264,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/api/ui/db/offer-performance":
+            if require_page_access(self, "offer-performance"):
+                handle_offer_review(self, "POST", parse_qs(parsed.query))
+            return
         operation = str((parse_qs(parsed.query).get("operation") or [""])[0]).strip().lower()
         if parsed.path == "/api/chat/agui":
             handle_agui_request(self, "POST")
@@ -712,6 +717,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/ui/db/offer-performance":
+                if first_query_value(query, "action") == "review-catalog":
+                    handle_offer_review(self, "GET", query)
+                    return
                 self.send_json(200, offer_performance_report(query))
                 return
 

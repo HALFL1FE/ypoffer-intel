@@ -4,6 +4,7 @@ import PromotionRelations from "./PromotionRelations.vue";
 import PromotionImport from "./PromotionImport.vue";
 import PromotionListPicker from "./PromotionListPicker.vue";
 import PromotionDailyChart from "./PromotionDailyChart.vue";
+import OfferReviewWorkspace from "./OfferReviewWorkspace.vue";
 import {
   categoryStyle,
   LINK_KINDS,
@@ -46,6 +47,7 @@ const props = defineProps<{
   download?: (rows: Record<string, unknown>[]) => void;
 }>();
 const t = (zh: string, en: string) => (props.language === "zh" ? zh : en);
+const reviewOpen = ref(false);
 const labels: Record<Metric, [string, string]> = {
   revenue: ["营收", "Revenue"],
   clicks: ["点击量", "Clicks"],
@@ -533,8 +535,12 @@ onBeforeUnmount(() => {
         </p>
       </div>
       <div class="promotion-header-actions">
+        <button type="button" class="primary" :aria-pressed="reviewOpen" @click="reviewOpen = !reviewOpen">
+          {{ reviewOpen ? t('返回观察期追踪', 'Back to observation tracking') : t('多清单 · 媒体复盘', 'Multi-list publisher review') }}
+        </button>
         <button
           id="promotion-add-merchant"
+          v-if="!reviewOpen"
           type="button"
           class="primary"
           :aria-expanded="manualOpen"
@@ -542,7 +548,7 @@ onBeforeUnmount(() => {
         >
           {{ t("添加商家", "Add merchant") }}</button
         ><button
-          v-if="readFile"
+          v-if="readFile && !reviewOpen"
           type="button"
           @click="importOpen = !importOpen"
           :aria-expanded="importOpen"
@@ -551,6 +557,8 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </header>
+    <OfferReviewWorkspace v-if="reviewOpen" :language="language" :download="download" />
+    <template v-else>
     <form
       v-if="manualOpen"
       class="promotion-panel promotion-manual"
@@ -1259,5 +1267,6 @@ onBeforeUnmount(() => {
         · {{ t("点击来源", "Clicks source") }}: {{ report.clickSource }}</span
       >
     </footer>
+    </template>
   </section>
 </template>
