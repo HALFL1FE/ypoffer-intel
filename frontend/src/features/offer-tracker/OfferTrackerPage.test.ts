@@ -163,17 +163,29 @@ describe("OfferTrackerPage", () => {
     expect(wrapper.text()).toContain("没有符合当前筛选条件的 Offer");
   });
 
-  it("exports all or selected merchants directly without a second workspace", async () => {
+  it("previews selected/all rows and exports only after confirmation", async () => {
     const payloads: OfferTrackerExportPayload[] = [];
-    const wrapper = mountTracker({ download: payload => payloads.push(payload) });
+    const wrapper = mountTracker({ download: (payload) => payloads.push(payload) });
+
     await wrapper.get('button[aria-label="导出当前筛选"]').trigger("click");
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
-    expect(payloads[0]).toMatchObject({ view: "offers", selectedOnly: false, dateRange: defaultDateRange });
+    expect(payloads).toHaveLength(0);
+    expect(wrapper.get('[role="dialog"]').text()).toContain("30 个商家");
+    expect(wrapper.get('.offer-export-tier-counts').text()).toContain("Tier 129");
+    await wrapper.get('.offer-export-confirm').trigger("click");
+    expect(payloads[0]).toMatchObject({ view: "offers", selectedOnly: false });
     expect(payloads[0]?.rows).toHaveLength(30);
+
     await wrapper.get('input[data-row-select="offer-01"]').setValue(true);
     await wrapper.get('button[aria-label="导出已选择"]').trigger("click");
-    expect(payloads[1]).toMatchObject({ view: "offers", selectedOnly: true });
+    expect(payloads).toHaveLength(1);
+    await wrapper.get('input[value="blue"]').setValue(true);
+    await wrapper.get('.offer-export-confirm').trigger("click");
+    expect(payloads[1]).toMatchObject({ view: "offers", selectedOnly: true, backgroundPreset: "blue" });
     expect(payloads[1]?.rows).toHaveLength(1);
+
+    await wrapper.get('button[aria-label="产品视图"]').trigger("click");
+    await nextTick();
+    expect(wrapper.get('button[aria-label="产品视图"]').attributes("aria-selected")).toBe("true");
   });
 
   it("shows a controlled loading error while retaining the previous rows", async () => {
@@ -215,7 +227,7 @@ describe("OfferTrackerPage", () => {
   it("localizes English view controls and accessibility labels", () => {
     const wrapper = mountTracker({ language: "en" });
 
-    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(["Offer list", "Google Ads", "Deal Sites", "Creators"]);
+    expect(wrapper.get('button[aria-label="Products view"]').text()).toBe("Products view");
     expect(wrapper.get('input[data-row-select]').attributes("aria-label")).toBe("Select Merchant 01");
     expect(wrapper.find('section[aria-label="Offer Tracker results"]').exists()).toBe(true);
     expect(wrapper.find('nav[aria-label="Offer Tracker pagination"]').exists()).toBe(true);
@@ -238,51 +250,23 @@ describe("OfferTrackerPage", () => {
     expect(wrapper.find('th[data-column="revenue"]').exists()).toBe(false);
     expect(wrapper.find('td[data-column="revenue"]').exists()).toBe(false);
     await wrapper.get('button[aria-label="导出当前筛选"]').trigger("click");
+    expect(wrapper.find('.offer-export-table th[title="Revenue"]').exists()).toBe(false);
+    await wrapper.get('.offer-export-sheets button:last-child').trigger("click");
+    expect(wrapper.find('.offer-export-table th[title="Revenue"]').exists()).toBe(false);
+    await wrapper.get('.offer-export-confirm').trigger("click");
     expect(payloads[0]?.visibleColumns?.revenue).toBe(false);
     expect(payloads[0]?.rules).toEqual({ highScore: 8, lowAovMax: 100 });
   });
 
-  it("keeps Top ASIN visible even if the old view hid it", async () => {
+  it("restores saved column settings before opening an export preview", async () => {
     window.localStorage.setItem("offerListTrackerColumnsV1", JSON.stringify({ aov: false, asins: false }));
-    const wrapper = mountTracker();
+    const wrapper = mountTracker({ download: () => undefined });
     await nextTick();
-    expect(wrapper.find('th[data-column="aov"]').exists()).toBe(false);
-    expect(wrapper.get('th[data-column="asins"]').text()).toContain("ASIN");
-    expect(wrapper.get('td[data-column="asins"]').text()).toContain("B000000001");
-  });
-
-  it("switches the four main tabs, scopes channels and keeps independent ASIN edits in the export", async () => {
-    const payloads: OfferTrackerExportPayload[] = [];
-    const source = [
-      { ...offers[0], aov: 200, topAsins: ['B000000001', 'B000000002'] },
-      { ...offers[1], aov: 50, salesAmount: 0, category: 'Other' }
-    ];
-    const wrapper = mountTracker({ offers: source, download: payload => payloads.push(payload) });
-    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Offer 清单', '谷歌广告', '折扣网站', '红人']);
-    await wrapper.get('button[role="tab"][aria-label="谷歌广告"]').trigger('click');
-    expect(wrapper.findAll('tbody tr[data-row-key]')).toHaveLength(1);
-    expect(wrapper.get('.channel-editor').attributes('open')).toBeUndefined();
-    expect(wrapper.get('th[data-column="asins"]').text()).toBe('本渠道 ASIN');
-    await wrapper.get('textarea[aria-label="本渠道 ASIN"]').setValue('B000000002');
-    await wrapper.get('textarea[aria-label="本渠道 ASIN"]').trigger('change');
-    expect(wrapper.get('td[data-column="asins"]').text()).toBe('B000000002');
-    await wrapper.get('button[aria-label="导出当前筛选"]').trigger('click');
-    expect(payloads[0]?.rows).toHaveLength(2);
-    expect(payloads[0]?.channelSelections?.['merchant-01']?.google?.asins).toEqual(['B000000002']);
-    await wrapper.get('button[role="tab"][aria-label="折扣网站"]').trigger('click');
-    expect(wrapper.findAll('tbody tr[data-row-key]')).toHaveLength(1);
-    expect(wrapper.get('tbody').text()).toContain('Merchant 02');
-    await wrapper.get('button[role="tab"][aria-label="红人"]').trigger('click');
-    expect(wrapper.get('td[data-column="asins"]').text()).toContain('B000000001');
-    await wrapper.get('button[role="tab"][aria-label="Offer 清单"]').trigger('click');
-    expect(wrapper.findAll('tbody tr[data-row-key]')).toHaveLength(2);
-    await wrapper.get('button[role="tab"][aria-label="谷歌广告"]').trigger('click');
-    expect(wrapper.get('td[data-column="asins"]').text()).toBe('B000000002');
-    await wrapper.get('textarea[aria-label="本渠道 ASIN"]').setValue('INVALID');
-    await wrapper.get('textarea[aria-label="本渠道 ASIN"]').trigger('change');
-    await wrapper.get('button[aria-label="导出当前筛选"]').trigger('click');
-    expect(payloads).toHaveLength(1);
-    expect(wrapper.find('[role="alert"]').exists()).toBe(true);
+    await wrapper.get('button[aria-label="导出当前筛选"]').trigger("click");
+    expect(wrapper.get('.offer-export-table thead').text()).not.toContain("客单价");
+    expect(wrapper.get('.offer-export-table thead').text()).not.toContain("AOV 类型");
+    await wrapper.get('.offer-export-sheets button:last-child').trigger("click");
+    expect(wrapper.get('.offer-export-table thead').text()).not.toContain("ASIN");
   });
 
   it("saves priority rules and recalculates row priority", async () => {

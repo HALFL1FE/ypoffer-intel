@@ -27,8 +27,6 @@ export interface ExportSheetContext {
   readonly referenceStyle?: boolean;
   readonly wrapText?: boolean;
   readonly freezeHeader?: boolean;
-  readonly legend?: readonly { label: string; color: string }[];
-  readonly autoFilter?: boolean;
 }
 
 export interface ExportSheet extends ExportSheetContext {
@@ -176,30 +174,26 @@ export function worksheetXml(
   const backgroundColors = context.workbookBackgroundColors || [];
   const backgroundRanges = context.rowBackgroundRanges || [];
   const referenceStyle = Boolean(context.referenceStyle);
-  const legend = context.legend || [];
-  const headerIndex = legend.length;
   const sheetRows: unknown[][] = [
-    ...legend.map(item => ["", item.label]),
     columns.map(([header]) => header),
     ...rows.map((row, index) => columns.map(([, getter]) => getter(row, index, context)))
   ];
   const rowXml = sheetRows.map((row, rowIndex) => {
-    const backgroundColor = rowIndex > headerIndex
-      ? worksheetRowBackgroundColor(rowIndex - headerIndex, backgroundRanges)
+    const backgroundColor = rowIndex > 0
+      ? worksheetRowBackgroundColor(rowIndex, backgroundRanges)
       : "";
     const backgroundIndex = backgroundColors.indexOf(backgroundColor);
     const cells = row.map((value, colIndex) => {
       const ref = `${columnName(colIndex)}${rowIndex + 1}`;
-      const columnFormat = rowIndex > headerIndex ? columns[colIndex]?.[3] || "" : "";
+      const columnFormat = columns[colIndex]?.[3] || "";
       const formatOffset = columnFormat === "percentage" ? 1 : columnFormat === "integer" ? 2 : 0;
-      const legendColorIndex = rowIndex < headerIndex && colIndex === 0 ? backgroundColors.indexOf(normalizeExportColor(legend[rowIndex]!.color)) : -1;
-      const styleId = legendColorIndex >= 0 ? 4 + legendColorIndex * 3 : rowIndex === headerIndex && referenceStyle
+      const styleId = rowIndex === 0 && referenceStyle
         ? 3
         : backgroundIndex >= 0
           ? 4 + backgroundIndex * 3 + formatOffset
           : formatOffset;
       const style = styleId ? ` s="${styleId}"` : "";
-      const formattedNumber = rowIndex > headerIndex ? exportNumberForFormat(value, columnFormat) : null;
+      const formattedNumber = rowIndex > 0 ? exportNumberForFormat(value, columnFormat) : null;
       if (formattedNumber !== null) return `<c r="${ref}"${style}><v>${formattedNumber}</v></c>`;
       if (typeof value === "number" && Number.isFinite(value)) return `<c r="${ref}"${style}><v>${value}</v></c>`;
       return `<c r="${ref}"${style} t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`;
@@ -211,10 +205,9 @@ export function worksheetXml(
   )).join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  ${context.freezeHeader ? `<sheetViews><sheetView workbookViewId="0"><pane ySplit="${headerIndex + 1}" topLeftCell="A${headerIndex + 2}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` : ""}
+  ${context.freezeHeader ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' : ""}
   <cols>${widths}</cols>
   <sheetData>${rowXml}</sheetData>
-  ${context.autoFilter && columns.length ? `<autoFilter ref="A${headerIndex + 1}:${columnName(columns.length - 1)}${sheetRows.length}"/>` : ""}
 </worksheet>`;
 }
 
@@ -413,7 +406,7 @@ export function buildWorkbookFiles(sheets: readonly ExportSheet[]): WorkbookFile
   const normalizedSheets = normalizeWorkbookSheets(sheets);
   const sheetCount = normalizedSheets.length;
   const workbookBackgroundColors = normalizedSheets
-    .flatMap((sheet) => [...(sheet.rowBackgroundRanges || []), ...(sheet.legend || [])].map((range) => normalizeExportColor(range.color)))
+    .flatMap((sheet) => (sheet.rowBackgroundRanges || []).map((range) => normalizeExportColor(range.color)))
     .filter((color, index, values) => color && values.indexOf(color) === index);
   return [
     { name: "[Content_Types].xml", data: contentTypesXml(sheetCount) },

@@ -43,26 +43,26 @@ describe("Offer export workbook", () => {
     const asins = ["B000000009", "B000000007", "B000000005", "B000000003", "B000000001", "B000000002"];
     const source = { ...rows[0], affCommissionRate: 0.5, topAsins: asins.join(","), internalField: "not for export" };
     const sheets = offerTrackerExportSheets({ rows: [source], view: "products", selectedOnly: true });
-    expect(sheets.map(sheet => sheet.sheetName)).toEqual(["全部商家汇总", "谷歌广告", "折扣网站", "红人"]);
-    expect(sheets[0]!.columns!.map(column => column[0]).slice(0, 12)).toEqual(["Priority", "Merchant ID", "Merchant Name", "Tier", "AFF Commission", "AOV", "Revenue", "AOV Type", "BB Preference", "Category", "Recommendation", "Top Rank ASINs"]);
-    expect(sheets.every(sheet => JSON.stringify(sheet.columns!.map(column => column[0])) === JSON.stringify(sheets[0]!.columns!.map(column => column[0])))).toBe(true);
+    expect(sheets.map(sheet => sheet.sheetName)).toEqual(["List of Offers", "Brand Product List"]);
+    expect(sheets[0]!.columns!.map(column => column[0])).toEqual(["Priority", "Merchant ID", "Merchant Name", "Tier", "AFF Commission", "AOV", "Revenue", "AOV Type", "BB Preference", "Category", "Recommendation"]);
+    expect(sheets[1]!.columns!.map(column => column[0])).toEqual(["Priority", "Merchant ID", "Merchant Name", "AOV", "Revenue", "AOV Type", "BB Preference", "Category", "Top Rank ASINs"]);
     const files = new Map(buildWorkbookFiles(sheets).map(file => [file.name, file.data]));
     const productsXml = String(files.get("xl/worksheets/sheet2.xml"));
-    expect(productsXml).toContain(asins.slice(0, 5).join("\n"));
+    expect(productsXml).toContain(asins.slice(0, 5).join(", "));
     expect(productsXml).not.toContain(asins[5]);
     expect(productsXml).not.toContain("internalField");
     expect(productsXml).toContain('width="42"');
     expect(productsXml).toContain('state="frozen"');
     expect(files.get("xl/styles.xml")).toContain('wrapText="1"');
-    expect(files.get("xl/worksheets/sheet1.xml")).toContain('<c r="E5" s="5"><v>0.005</v></c>');
+    expect(files.get("xl/worksheets/sheet1.xml")).toContain('<c r="E2" s="5"><v>0.005</v></c>');
     expect(source.topAsins).toBe(asins.join(","));
   });
   it("uses the same optional columns in both sheets and current priority rules", () => {
     const payload = { rows, view: "offers" as const, selectedOnly: false, visibleColumns: { aov: false, revenue: false, category: false, asins: false, commission: false, recommendation: false }, rules: { highScore: 1, lowAovMax: 100 } };
     const sheets = offerTrackerExportSheets(payload);
-    expect(sheets[0]!.columns!.map(column => column[0]).slice(0, 6)).toEqual(["Priority", "Merchant ID", "Merchant Name", "Tier", "BB Preference", "Top Rank ASINs"]);
-    expect(sheets[1]!.columns!.map(column => column[0])).toEqual(sheets[0]!.columns!.map(column => column[0]));
-    expect(sheets[0]!.columns![0]![1](rows[0]!)).toContain("高优先级offer");
+    expect(sheets[0]!.columns!.map(column => column[0])).toEqual(["Priority", "Merchant ID", "Merchant Name", "Tier", "BB Preference"]);
+    expect(sheets[1]!.columns!.map(column => column[0])).toEqual(["Priority", "Merchant ID", "Merchant Name", "BB Preference"]);
+    expect(sheets[0]!.columns![0]![1](rows[0]!)).toBe("High Priority");
   });
   it("validates ranges and applies custom fills ahead of presets", () => {
     expect(validExportRanges([{ start: 1, end: 2, color: '#D6EEDD' }, { start: 2, end: 3, color: '#CCFFFF' }], 4)).toBe(false);
