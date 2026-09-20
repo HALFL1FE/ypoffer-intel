@@ -44,7 +44,7 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 
 function monthKey(value: unknown): string {
   const raw = text(value);
-  const match = raw.match(/(20\d{2})[-/](0?[1-9]|1[0-2])/);
+  const match = raw.match(/(20\d{2})[-/](1[0-2]|0?[1-9])(?!\d)/);
   return match ? `${match[1]}-${String(Number(match[2])).padStart(2, "0")}` : "";
 }
 
