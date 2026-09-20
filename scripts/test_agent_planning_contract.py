@@ -126,6 +126,23 @@ def test_old_planning_messages_are_not_accepted():
         }
 
 
+def test_six_merchant_top_asins_plan_preserves_signed_view():
+    from unittest.mock import patch
+    merchants = [("406220", "AOCHUAN"), ("362448", "Midland Radio"), ("380928", "DS18"),
+                 ("384704", "ISOtunes"), ("385315", "SABRENT"), ("362602", "Productech")]
+    question = "\n".join("\t".join(row) for row in merchants) + "；以上商家的top asin可以帮我提取吗"
+    calls = [{"name": "merchant_analysis", "arguments": {"merchant": mid, "view": "top_asins"}} for mid, _ in merchants]
+    with patch.object(chat_agent_http, "call_llm_tools", return_value={"content": None, "tool_calls": calls}):
+        status, payload = chat_agent_http.plan_agent_request({"contractVersion": "v2", "question": question,
+            "language": "zh", "enabledTools": ["merchant_analysis", "asin_analysis"]})
+    assert status == 200 and payload["ok"], payload
+    assert len(payload["toolCalls"]) == 6
+    assert [call["arguments"] for call in payload["toolCalls"]] == [call["arguments"] for call in calls]
+    assert payload["planProof"]
+    for prompt in (chat_agent_http.PLANNING_PROMPT_ZH, chat_agent_http.PLANNING_PROMPT_EN):
+        assert "view=top_asins" in prompt
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

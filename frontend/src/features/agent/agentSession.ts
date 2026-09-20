@@ -62,11 +62,14 @@ export interface AgentHistoryMessage {
   readonly content: string;
 }
 
+import { asinContextFromViews } from "./agentAsinContext";
+
 export interface AgentSessionRequest {
   readonly prompt: string;
   readonly language: UiLanguage;
   readonly history: readonly AgentHistoryMessage[];
   readonly memoryText: string;
+  readonly asinContext?: readonly string[];
   readonly signal: AbortSignal;
   readonly promotionAttachment?: AgentPromotionAttachment;
 }
@@ -163,6 +166,11 @@ export interface AgentSessionOptions {
   readonly enableQuestionLogging?: boolean;
   readonly enableTrace?: boolean;
   readonly dataAsOf?: string | null;
+  readonly asinRankingContext?: {
+    readonly version: number | null;
+    readonly startDate: string | null;
+    readonly endDate: string | null;
+  };
   readonly loadPromotionReport?: PromotionReportLoader;
 }
 
@@ -405,8 +413,35 @@ function optionalAsinText(row: Row, keys: readonly string[], maximum = 160): str
 function optionalAsinNumber(row: Row, keys: readonly string[]): number | undefined {
   const value = firstValue(row, keys);
   if (value === undefined || value === null || value === "") return undefined;
-  const parsed = numberValue(value);
+  const parsed = typeof value === "number" || typeof value === "string" ? Number(value) : NaN;
   return Number.isFinite(parsed) ? rounded(parsed) : undefined;
+}
+
+function optionalAsinPrice(row: Row, keys: readonly string[]): string | number | undefined {
+  const value = firstValue(row, keys);
+  if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? rounded(value) : undefined;
+  if (typeof value !== "string") return undefined;
+  const price = value.trim();
+  // 保留来源中的货币标记，不把带符号的价格当成缺失，也不猜测币种。
+  if (price.length > 80 || !/^(?:(?:[$€£¥]|USD|EUR|GBP|JPY|CNY|CAD|AUD)\s*)?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/i.test(price)) return undefined;
+  return /^\d+(?:\.\d+)?$/.test(price) ? rounded(Number(price)) : price;
+}
+
+const ASIN_DETAIL_FIELDS = [
+  ["merchantId", "商家 ID", "Merchant ID"], ["merchantName", "商家名称", "Merchant"],
+  ["productName", "商品名称", "Product"], ["productUrl", "商品链接", "Product URL"],
+  ["category", "品类", "Category"], ["dealPrice", "商品价格", "Deal price"],
+  ["originalPrice", "原价", "Original price"], ["discountPercent", "折扣（%）", "Discount (%)"],
+  ["commissionRate", "佣金率（源值）", "Commission rate (source value)"],
+  ["updatedAt", "商品更新时间", "Product updated at"]
+] as const;
+
+function asinDetailRows(rows: readonly Row[], language: UiLanguage) {
+  return rows.flatMap((row) => ASIN_DETAIL_FIELDS.map(([key, zh, en]) => ({
+    label: text(row.asin, 20),
+    values: [language === "en" ? en : zh, row[key] === undefined || row[key] === null || row[key] === ""
+      ? (language === "en" ? "Not provided" : "未提供") : String(row[key])]
+  })));
 }
 
 function asinSummaryRow(row: Row): Record<string, unknown> | null {
@@ -414,17 +449,23 @@ function asinSummaryRow(row: Row): Record<string, unknown> | null {
   if (!ASIN_PATTERN.test(asin)) return null;
   const id = merchantId(row);
   const name = merchantName(row);
-  const metrics = metricValues(row);
+  const metrics = row.asinPerformanceAvailable === false || (Array.isArray(row.monthly) && !row.monthly.length)
+    ? {} : metricValues(row);
+  const dealPrice = optionalAsinPrice(row, ["dealPrice", "deal_price", "Deal Price"]);
+  const originalPrice = optionalAsinPrice(row, ["originalPrice", "original_price", "Original Price"]);
   return {
     asin,
+    asinPerformanceAvailable: Object.keys(metrics).length > 0,
     ...(id ? { merchantId: id } : {}),
     ...(name ? { merchantName: name } : {}),
-    ...(optionalAsinText(row, ["productName", "product_name", "Product Name", "title", "name"]) ? { productName: optionalAsinText(row, ["productName", "product_name", "Product Name", "title", "name"]) } : {}),
+    ...(optionalAsinText(row, ["productName", "product_name", "Product Name", "title", "name"], 500) ? { productName: optionalAsinText(row, ["productName", "product_name", "Product Name", "title", "name"], 500) } : {}),
     ...(optionalAsinText(row, ["productUrl", "product_url", "Product URL", "url"], 500) ? { productUrl: optionalAsinText(row, ["productUrl", "product_url", "Product URL", "url"], 500) } : {}),
-    ...(optionalAsinNumber(row, ["dealPrice", "deal_price", "Deal Price"]) !== undefined ? { dealPrice: optionalAsinNumber(row, ["dealPrice", "deal_price", "Deal Price"]) } : {}),
-    ...(optionalAsinNumber(row, ["originalPrice", "original_price", "Original Price"]) !== undefined ? { originalPrice: optionalAsinNumber(row, ["originalPrice", "original_price", "Original Price"]) } : {}),
+    ...(dealPrice !== undefined ? { dealPrice } : {}),
+    ...(originalPrice !== undefined ? { originalPrice } : {}),
     ...(optionalAsinNumber(row, ["discountPercent", "discount_percent", "Discount Percent"]) !== undefined ? { discountPercent: optionalAsinNumber(row, ["discountPercent", "discount_percent", "Discount Percent"]) } : {}),
     ...(optionalAsinText(row, ["category", "Category"]) ? { category: optionalAsinText(row, ["category", "Category"]) } : {}),
+    ...(optionalAsinNumber(row, ["commissionRate"]) !== undefined ? { commissionRate: optionalAsinNumber(row, ["commissionRate"]) } : {}),
+    ...(optionalAsinText(row, ["updatedAt"], 80) ? { updatedAt: optionalAsinText(row, ["updatedAt"], 80) } : {}),
     ...Object.fromEntries(Object.entries(metrics).map(([key, value]) => [key, rounded(value)]))
   };
 }
@@ -701,6 +742,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
   let messages: AgentHistoryMessage[] = [];
   let steps: AgentTimelineStep[] = [];
   let resultViews: AgentResultView[] = [];
+  let planningAsins: readonly string[] = [];
   let response = "";
   let partial = false;
   let omittedTargets: string[] = [];
@@ -942,6 +984,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     const body: Record<string, unknown> = {
       contractVersion: "v2",
       question: text(question, 4_000),
+      asinContext: planningAsins,
       language,
       enabledTools: AGENT_TOOL_NAMES.filter((name) => promotionAttachment || name !== "promotion_analysis"),
       trace: { runId: trace.runId, questionEventId: trace.questionEventId, tracePhase: "planning" }
@@ -1017,6 +1060,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
   }
 
   async function executeAsinAnalysis(args: Record<string, unknown>, signal: AbortSignal): Promise<AgentToolResult> {
+    if (args.view !== undefined && args.view !== "details" && args.view !== "performance") return failure("invalid_arguments");
     const asins = normalizeAsins(args.asins);
     const unavailableSource: DataSource = offers.length ? "cache" : "unavailable";
     if (!asins) {
@@ -1083,11 +1127,49 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
   }
 
   async function executeMerchantAnalysis(args: Record<string, unknown>, signal: AbortSignal): Promise<AgentToolResult> {
+    if (args.view !== undefined && args.view !== "overview" && args.view !== "top_asins") return failure("invalid_arguments");
     const input = text(args.merchant, 80);
     if (!input) return failure("invalid_arguments", offers.length ? "cache" : "unavailable", { status: "invalid_filter", field: "merchant" });
     const resolved = resolveMerchant(input, offers);
     if (!resolved.row) return resolved.result || failure("not_found");
     const row = resolved.row;
+    if (args.view === "top_asins") {
+      const raw = row.topAsins;
+      const topAsins = Array.isArray(raw)
+        ? [...new Set(raw.filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim().toUpperCase()).filter((value) => ASIN_PATTERN.test(value)))].slice(0, 5)
+        : [];
+      const status = topAsins.length ? "available" : Array.isArray(raw) && raw.length === 0 ? "empty" : "unavailable";
+      const context = options.asinRankingContext;
+      const version = typeof context?.version === "number" && Number.isInteger(context.version) && context.version > 0 ? context.version : null;
+      const basis = version === 1 || version === 2 ? "period_revenue_desc_then_asin" : "unknown";
+      const date = (value: unknown): string | null => {
+        if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+        const parsed = new Date(value);
+        return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value ? value : null;
+      };
+      let startDate = date(context?.startDate);
+      let endDate = date(context?.endDate);
+      if (startDate && endDate && startDate > endDate) { startDate = null; endDate = null; }
+      const dataAsOf = text(options.dataAsOf, 100) || null;
+      const en = currentLanguage === "en";
+      const availability = status === "empty"
+        ? (en ? "No Top ASINs provided in this snapshot." : "当前快照未提供该商家的 Top ASIN。")
+        : status === "unavailable" ? (en ? "Top ASIN data is unavailable." : "Top ASIN 数据不可用。") : "";
+      const rankingNote = basis === "unknown"
+        ? (en ? "Ranking basis is unknown; snapshot order is preserved." : "排序口径未知，保留快照原有顺序。")
+        : (en ? "Positive period revenue descending; ties and remaining slots use ASIN code order. Entries may have no sales." : "按期间单品正营收降序，同营收及剩余位置按 ASIN 编码补齐；不代表全部有成交。");
+      const note = [availability, rankingNote,
+        en ? `Snapshot range: ${startDate || "unknown"} to ${endDate || "unknown"}; as of ${dataAsOf || "unknown"}.`
+          : `快照区间：${startDate || "未知"} 至 ${endDate || "未知"}；数据日期：${dataAsOf || "未知"}。`,
+        en ? "Current snapshot only, up to 5 per merchant; other periods and larger lists are not queried."
+          : "仅提取当前快照，每家最多 5 个；未查询其他期间或更多商品。"
+      ].filter(Boolean).join(" ");
+      return success({ merchant: merchantObject(row), topAsins,
+        asinRanking: { status, basis, limit: 5, returned: topAsins.length, startDate, endDate, dataAsOf, version },
+        headline: `${merchantName(row)} · Top ASIN`, note
+      }, "cache", dataAsOf);
+    }
     const monthlyResult = await merchantMonthlyRows(row, 12, signal);
     const monthly = monthlyResult.rows.map((item) => monthlyData(item));
     const name = merchantName(row);
@@ -1427,6 +1509,16 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
   function resultViewFromExecution(item: AgentToolExecution): AgentResultView | null {
     const result = item.result;
     const data = result.ok && result.data ? result.data : {};
+    if (item.call.name === "merchant_analysis" && Array.isArray(data.topAsins) && isRecord(data.merchant)) {
+      const merchant = data.merchant;
+      return normalizeAgentResultView({
+        id: item.call.id, toolName: item.call.name, kind: data.topAsins.length ? "table" : "summary", status: "done",
+        title: text(data.headline, 180), source: result.source.dataSource, dataAsOf: result.source.dataAsOf,
+        columns: currentLanguage === "en" ? ["Merchant ID", "Merchant", "ASIN"] : ["商家 ID", "商家", "ASIN"],
+        rows: data.topAsins.map((asin, index) => ({ label: String(index + 1), values: [text(merchant.id), text(merchant.name), text(asin)] })),
+        metrics: [], message: text(data.note, 800), estimated: false, partial: false
+      });
+    }
     const scalar = (label: string, value: unknown): string => {
       if (typeof value === "number") return Number.isFinite(value) ? formatAgentResultNumber(label, value) : "";
       if (typeof value === "string" || typeof value === "boolean") return text(value, 120);
@@ -1435,6 +1527,15 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     if (item.call.name === "asin_analysis") {
       const summarySource = Array.isArray(data.rows) ? data.rows.filter(isRecord) : [];
       const monthlySource = Array.isArray(data.monthly) ? data.monthly.filter(isRecord) : [];
+      if (result.ok && (item.call.arguments.view === "details" || !monthlySource.length)) {
+        return normalizeAgentResultView({
+          id: item.call.id, toolName: item.call.name, kind: "table", status: "done",
+          title: text(data.headline, 180), source: result.source.dataSource, dataAsOf: result.source.dataAsOf,
+          columns: currentLanguage === "en" ? ["Field", "Value"] : ["信息", "内容"],
+          rows: asinDetailRows(summarySource, currentLanguage), metrics: [],
+          message: text(data.note, 800), partial: summarySource.length > 10, estimated: false
+        });
+      }
       const sourceRows = monthlySource.length ? monthlySource : summarySource;
       const preferredColumns = monthlySource.length
         ? ["month", "orders", "revenue", "commission", "epc", "aov", "conversionRate", "clicks"]
@@ -1530,18 +1631,25 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       const headline = text(data.headline, 240);
       if (headline) lines.push(headline);
       if (item.call.name === "asin_analysis" && Array.isArray(data.rows)) {
-        const headers = language === "en"
-          ? "| ASIN | Merchant | Orders | Revenue | EPC | CVR |\n| --- | --- | ---: | ---: | ---: | ---: |"
-          : "| ASIN | 商户 | 订单 | 销售额 | EPC | CVR |\n| --- | --- | ---: | ---: | ---: | ---: |";
-        lines.push(headers);
-        data.rows.forEach((row) => {
-          if (!isRecord(row)) return;
-          lines.push("| " + text(row.asin, 20) + " | " + text(row.merchantName, 120)
-            + " | " + formatAgentResultNumber("orders", numberValue(row.orders))
-            + " | " + formatAgentResultNumber("revenue", numberValue(row.revenue))
-            + " | " + formatAgentResultNumber("epc", numberValue(row.epc))
-            + " | " + formatAgentResultNumber("conversionRate", numberValue(row.conversionRate)) + " |");
-        });
+        const cell = (value: string) => value.replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ");
+        lines.push([
+          language === "en" ? "| ASIN | Field | Value |\n| --- | --- | --- |" : "| ASIN | 信息 | 内容 |\n| --- | --- | --- |",
+          ...asinDetailRows(data.rows.filter(isRecord), language).map((row) => `| ${cell(row.label)} | ${row.values.map(cell).join(" | ")} |`)
+        ].join("\n"));
+        lines.push(text(data.note, 800));
+        if (item.call.arguments.view === "details") return;
+        const performanceRows = data.rows.filter(isRecord).filter((row) => row.asinPerformanceAvailable !== false);
+        if (performanceRows.length) {
+          const headers = language === "en"
+            ? "| ASIN | Merchant | Orders | Revenue | EPC | CVR |\n| --- | --- | ---: | ---: | ---: | ---: |"
+            : "| ASIN | 商户 | 订单 | 销售额 | EPC | CVR |\n| --- | --- | ---: | ---: | ---: | ---: |";
+          lines.push([headers, ...performanceRows.map((row) =>
+            "| " + text(row.asin, 20) + " | " + text(row.merchantName, 120)
+              + " | " + formatAgentResultNumber("orders", numberValue(row.orders))
+              + " | " + formatAgentResultNumber("revenue", numberValue(row.revenue))
+              + " | " + formatAgentResultNumber("epc", numberValue(row.epc))
+              + " | " + formatAgentResultNumber("conversionRate", numberValue(row.conversionRate)) + " |")].join("\n"));
+        }
         if (Array.isArray(data.monthly) && data.monthly.length) {
           lines.push(language === "en"
             ? "| Month | ASIN | Orders | Revenue | EPC | CVR |\n| --- | --- | ---: | ---: | ---: | ---: |"
@@ -1555,6 +1663,13 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
               + " | " + formatAgentResultNumber("conversionRate", numberValue(row.conversionRate)) + " |");
           });
         }
+      } else if (item.call.name === "merchant_analysis" && Array.isArray(data.topAsins) && isRecord(data.merchant)) {
+        const cell = (value: unknown) => text(value, 200).replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ");
+        lines.push(language === "en"
+          ? "| Merchant ID | Merchant | Top ASIN |\n| --- | --- | --- |"
+          : "| 商家 ID | 商家 | Top ASIN |\n| --- | --- | --- |");
+        lines.push(`| ${cell(data.merchant.id)} | ${cell(data.merchant.name)} | ${data.topAsins.length ? data.topAsins.join(", ") : (language === "en" ? "Not provided" : "未提供")} |`);
+        lines.push(text(data.note, 800));
       } else if (item.call.name === "merchant_analysis" && isRecord(data.metrics)) {
         const metrics = data.metrics;
         lines.push("Merchant: " + (isRecord(data.merchant) ? text(data.merchant.name, 120) : toolTarget(item.call))
@@ -1750,6 +1865,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     }
 
     currentLanguage = request.language === "en" ? "en" : "zh";
+    planningAsins = request.asinContext ?? (status === "done" ? asinContextFromViews(resultViews) : []);
     const baseHistory = history.length ? history.slice(-MAX_HISTORY) : clipHistory(request.history).slice(-MAX_HISTORY);
     history = baseHistory.slice();
     messages = [...baseHistory, { role: "user", content: prompt }, { role: "assistant", content: "" }];

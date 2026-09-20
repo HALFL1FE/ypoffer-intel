@@ -104,6 +104,7 @@ const run: AgentRunner = async (request: AgentRunRequest): Promise<AgentRunResul
       language: session.language,
       memory: text(request.memoryText, 8000),
       history: session.history,
+      asinContext: request.asinContext || [],
       legacyParity: true,
       promotionContext: request.promotionAttachment ? promotionManifestForRequest(request.promotionAttachment) : null
     }

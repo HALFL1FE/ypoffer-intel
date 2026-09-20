@@ -32,6 +32,13 @@ function fixture(bypassPlanning = false) {
 }
 
 describe("CopilotKit behavior parity", () => {
+  it("将上一轮 ASIN 引用传入 AG-UI 规划状态", async () => {
+    const f = fixture();
+    sdk.run.mockResolvedValue(undefined);
+    await f.run({ ...f.request, prompt: "给我这5个ASIN的信息", asinContext: ["B0D2HKCMBP", "B09BVXT8TJ"] });
+    expect(sdk.setState.mock.calls[0]![0].offerIntelligence.asinContext).toEqual(["B0D2HKCMBP", "B09BVXT8TJ"]);
+    f.wrapper.unmount();
+  });
   it("routes methodology directly with no extra model/planning call", async () => {
     const f = fixture(true);
     expect((await f.run(f.request)).response).toBe("历史上下文解释");

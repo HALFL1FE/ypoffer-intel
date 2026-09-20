@@ -12,6 +12,8 @@ import type {
   OfferTrackerRules,
   OfferTrackerSelectionSummary,
   OfferTrackerView,
+  OfferChannel,
+  OfferChannelSelections,
   UiLanguage
 } from "../../shared/contracts/offer";
 import {
@@ -19,8 +21,8 @@ import {
   aovTypeLabel,
   bbPolicyLabel,
   normalizeOfferTrackerRules,
-  priorityLabel
 } from "./offerTrackerModel";
+import { CHANNELS, CHANNEL_NAMES, CHANNEL_GRADES, CHANNEL_GRADE_COLORS, CHANNEL_VERIFICATION } from "./offerChannels";
 
 type OptionalColumnKey = OfferTrackerOptionalColumn;
 type PanelName = "columns" | "rules" | null;
@@ -51,6 +53,8 @@ const props = defineProps<{
   search: string;
   rules: OfferTrackerRules;
   language: UiLanguage;
+  activeTab?: "offers" | OfferChannel;
+  channelSelections?: OfferChannelSelections;
 }>();
 
 const emit = defineEmits<{
@@ -60,11 +64,17 @@ const emit = defineEmits<{
   (event: "toggle-all"): void;
   (event: "page-change", page: number): void;
   (event: "view-change", view: OfferTrackerView): void;
+  (event: "tab-change", tab: "offers" | OfferChannel): void;
   (event: "rules-change", rules: OfferTrackerRules): void;
   (event: "columns-change", columns: OfferTrackerColumnVisibility): void;
 }>();
 
 const isProductsView = computed(() => props.view === "products");
+const tabs = computed(() => [
+  { key: "offers" as const, label: props.language === "zh" ? "Offer 清单" : "Offer list" },
+  ...CHANNELS.map(key => ({ key, label: CHANNEL_NAMES[key][props.language === "zh" ? 0 : 1] }))
+]);
+const isChannel = computed(() => props.activeTab && props.activeTab !== "offers");
 const visibleColumns = ref<Record<OptionalColumnKey, boolean>>({ ...DEFAULT_VISIBLE_COLUMNS });
 watch(visibleColumns, columns => emit("columns-change", { ...columns }), { immediate: true });
 const openPanel = ref<PanelName>(null);
@@ -137,13 +147,14 @@ const columnOptions = computed<readonly { key: OptionalColumnKey; label: string 
 
 const visibleColumnCount = computed(() => {
   const optionalCount = columnOptions.value.reduce(
-    (count, column) => count + (visibleColumns.value[column.key] !== false ? 1 : 0),
+    (count, column) => count + (isColumnVisible(column.key) ? 1 : 0),
     0
   );
   return 2 + optionalCount;
 });
 
 function isColumnVisible(key: OptionalColumnKey): boolean {
+  if (key === "asins" && props.activeTab) return true;
   return !PRODUCT_HIDDEN_COLUMNS.has(key) || !isProductsView.value
     ? visibleColumns.value[key] !== false
     : false;
@@ -230,28 +241,23 @@ function recommendation(row: OfferTrackerRow): string {
   if (row.priority.key === "low-aov") return props.language === "zh" ? "适合低客单价测试" : "Good fit for low-AOV testing";
   return props.language === "zh" ? "进入常规机会池" : "Keep in the standard opportunity pool";
 }
+
+function verification(row: OfferTrackerRow): string {
+  const tab = props.activeTab;
+  const status = tab && tab !== "offers" ? props.channelSelections?.[row.merchantId]?.[tab]?.verification ?? "pending" : "pending";
+  return CHANNEL_VERIFICATION[status][props.language === "zh" ? 0 : 1];
+}
 </script>
 
 <template>
   <section class="offer-tracker-modern-table-panel offer-tracker-table-panel" :aria-label="copy.results">
     <div class="offer-tracker-table-toolbar table-toolbar">
       <div class="offer-tracker-view-tabs" role="tablist" :aria-label="copy.results">
-        <button
-          type="button"
-          :class="{ active: view === 'offers' }"
-          :aria-label="copy.offersView"
-          :aria-selected="view === 'offers' ? 'true' : 'false'"
-          role="tab"
-          @click="emit('view-change', 'offers')"
-        >{{ copy.offerTab }}</button>
-        <button
-          type="button"
-          :class="{ active: view === 'products' }"
-          :aria-label="copy.productsView"
-          :aria-selected="view === 'products' ? 'true' : 'false'"
-          role="tab"
-          @click="emit('view-change', 'products')"
-        >{{ copy.productTab }}</button>
+        <button v-for="tab in tabs" :key="tab.key" type="button" role="tab"
+          :class="{ active: (activeTab || 'offers') === tab.key }"
+          :aria-label="tab.label" :aria-selected="(activeTab || 'offers') === tab.key"
+          @click="emit('tab-change', tab.key)"
+        >{{ tab.label }}</button>
       </div>
 
       <div class="offer-tracker-table-actions">
@@ -302,7 +308,8 @@ function recommendation(row: OfferTrackerRow): string {
                 :id="`offerTrackerColumn-${column.key}`"
                 type="checkbox"
                 :data-offer-tracker-column="column.key"
-                :checked="visibleColumns[column.key] !== false"
+                :checked="isColumnVisible(column.key)"
+                :disabled="column.key === 'asins' && Boolean(activeTab)"
                 @change="setColumnVisibility(column.key, checked($event))"
               >
               <span>{{ column.label }}</span>
@@ -353,6 +360,13 @@ function recommendation(row: OfferTrackerRow): string {
       </div>
     </div>
 
+    <div class="offer-channel-context">
+      <div class="offer-channel-legend">
+        <span v-for="(labels, grade) in CHANNEL_GRADES" :key="grade"><i :style="{ background: CHANNEL_GRADE_COLORS[grade] }"></i>{{ labels[language === 'zh' ? 0 : 1] }}</span>
+      </div>
+      <small>{{ isChannel ? (language === 'zh' ? '渠道候选默认待核实；ASIN 默认沿用全站 Top 5，可单独调整。' : 'Channel candidates are unverified; ASINs start from overall Top 5 and can be adjusted.') : (language === 'zh' ? 'Offer 信息与产品 Top ASIN 合并展示；导出为一个 Excel、四个工作表。' : 'Offer details and product Top ASINs together. Export one workbook with four sheets.') }}</small>
+      <slot name="channel-editor" />
+    </div>
     <div class="offer-tracker-table-scroll offer-tracker-table-wrap">
       <table class="offer-tracker-table">
         <thead>
@@ -376,7 +390,7 @@ function recommendation(row: OfferTrackerRow): string {
             <th v-if="isColumnVisible('revenue')" scope="col" data-column="revenue">{{ copy.revenue }}</th>
             <th v-if="isColumnVisible('bbPolicy')" scope="col" data-column="bbPolicy">{{ copy.bbPolicy }}</th>
             <th v-if="isColumnVisible('category')" scope="col" data-column="category">{{ copy.category }}</th>
-            <th v-if="isColumnVisible('asins')" scope="col" data-column="asins" :title="copy.topAsinsHelp" :aria-description="copy.topAsinsHelp">{{ copy.topAsins }}</th>
+            <th v-if="isColumnVisible('asins')" scope="col" data-column="asins" :title="isChannel ? undefined : copy.topAsinsHelp">{{ isChannel ? (language === 'zh' ? '本渠道 ASIN' : 'Channel ASINs') : copy.topAsins }}</th>
             <th v-if="isColumnVisible('recommendation')" scope="col" data-column="recommendation">{{ copy.recommendation }}</th>
           </tr>
         </thead>
@@ -391,7 +405,7 @@ function recommendation(row: OfferTrackerRow): string {
                   :checked="selectedKeys.has(row.key)"
                   @change="emit('toggle-row', row.key, checked($event))"
                 >
-                <span :class="['offer-tracker-priority-badge', row.priority.key]">{{ priorityLabel(row.priority.key, language) }}</span>
+                <span :class="['offer-tracker-priority-badge', row.priority.key]" :style="{ background: CHANNEL_GRADE_COLORS[row.priority.key], color: '#16334c', border: '1px solid #c7d4df' }">{{ CHANNEL_GRADES[row.priority.key][language === 'zh' ? 0 : 1] }}</span>
               </div>
             </td>
             <td data-column="merchant">
@@ -415,7 +429,7 @@ function recommendation(row: OfferTrackerRow): string {
               </div>
               <span v-else>—</span>
             </td>
-            <td v-if="isColumnVisible('recommendation')" data-column="recommendation"><span class="offer-tracker-recommendation-cell">{{ recommendation(row) }}</span></td>
+            <td v-if="isColumnVisible('recommendation')" data-column="recommendation"><span class="offer-tracker-recommendation-cell">{{ recommendation(row) }}<small v-if="isChannel"> · {{ verification(row) }}</small></span></td>
           </tr>
           <tr v-if="!rows.length" data-empty-state>
             <td :colspan="visibleColumnCount">{{ copy.empty }}</td>
