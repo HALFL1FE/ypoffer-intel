@@ -10,6 +10,24 @@ vi.mock("@copilotkit/vue/v2", () => ({ CopilotKitProvider: { name: "Provider", p
 vi.mock("./CopilotKitAgentRuntime.vue", () => ({ default: { name: "Runtime", props: ["beginRun"], template: "<div />" } }));
 
 describe("CopilotKit local result projection", () => {
+  it("ASIN 详情综合失败时保留价格和商品链接，不重新查询", async () => {
+    const agent = createAgentSession({ offers: [], language: "zh", enableTrace: false, enableQuestionLogging: false,
+      fetcher: vi.fn(async () => new Response(JSON.stringify({ ok: true, rows: [{ asin: "B09DPRB3TR",
+        merchantId: "406220", merchantName: "AOCHUAN", dealPrice: "$51.99", productUrl: "https://www.amazon.com/dp/B09DPRB3TR", monthly: [] }] }),
+        { headers: { "Content-Type": "application/json" } })) });
+    const fallbackRun = vi.fn();
+    const wrapper = mount(CopilotKitAgentHost, { props: { language: "zh", endpoint: "/api/copilotkit", enabled: true,
+      fallbackRun, toolExecutor: agent.executeTool } });
+    const session = wrapper.findComponent({ name: "Runtime" }).props("beginRun")({ prompt: "ASIN B09DPRB3TR 详情", language: "zh",
+      history: [], memory: emptyAgentMemory(), memoryText: "", signal: new AbortController().signal });
+    await session.execute({ callId: "r1c1", toolName: "asin_analysis", arguments: { asins: ["B09DPRB3TR"], view: "details" } });
+    const result = await session.complete("", { synthesisFailed: true, partial: false, omittedTargets: [] });
+    expect(fallbackRun).not.toHaveBeenCalled();
+    expect(result.response).toContain("https://www.amazon.com/dp/B09DPRB3TR");
+    expect(result.response).toContain("$51.99");
+    expect(result.response).not.toContain("| Orders |");
+    wrapper.unmount();
+  });
   it("Top ASIN 综合失败时保留本轮真实工具结果，不重复规划", async () => {
     const agent = createAgentSession({ offers: [{ merchantId: "362448", merchantName: "Midland Radio", topAsins: ["B09PFBWV55"] }],
       language: "zh", enableTrace: false, enableQuestionLogging: false });
