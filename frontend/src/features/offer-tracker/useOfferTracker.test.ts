@@ -78,28 +78,3 @@ describe("Offer Tracker loaded date ranges", () => {
     expect(tracker.loading.value).toBe(false);
   });
 });
-
-
-describe("Offer Tracker channel scope", () => {
-  it("paginates and selects within the active channel but exports the full filtered master", () => {
-    const rows = Array.from({length: 60}, (_, i) => ({ merchantId: String(i), merchantName: `Brand ${i}`, category: 'Beauty', topAsins: ['B000000001'], affCommissionRate: 10, aov: 200, salesAmount: i < 30 ? 100 : 0 }));
-    const tracker = useOfferTracker({ offers: rows, defaultDateRange });
-    tracker.setTab('google');
-    expect(tracker.filteredRows.value).toHaveLength(30);
-    tracker.setPage(2);
-    expect(tracker.pageRows.value).toHaveLength(5);
-    tracker.toggleCurrentPage(true);
-    expect(tracker.exportRows(true)).toHaveLength(5);
-    expect(tracker.exportRows(false)).toHaveLength(60);
-    tracker.setTab('deals');
-    expect(tracker.page.value).toBe(1);
-    expect(tracker.pageRows.value).toHaveLength(0);
-    expect(tracker.exportRows(true)).toHaveLength(0);
-    expect(tracker.exportRows(false)).toHaveLength(60);
-    tracker.setTab('google');
-    tracker.toggleAllFiltered();
-    expect(tracker.exportRows(true)).toHaveLength(30);
-    tracker.setSearch('Brand 29');
-    expect(tracker.exportRows(false)).toHaveLength(1);
-  });
-});

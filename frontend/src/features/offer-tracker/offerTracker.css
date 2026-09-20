@@ -1128,12 +1128,3 @@
     transition-duration: .01ms !important;
   }
 }
-
-.offer-channel-context { padding: 10px 16px; border-top: 1px solid #e2eaf2; }
-.offer-channel-legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; margin-bottom: 6px; }
-.offer-channel-legend span { display: inline-flex; align-items: center; gap: 5px; }
-.offer-channel-legend i { width: 14px; height: 14px; border: 1px solid #bacbd9; border-radius: 3px; }
-.offer-channel-context > small { color: #647992; font-size: 12px; }
-.offer-tracker-view-tabs { flex-shrink: 0; flex-wrap: nowrap; }
-.offer-tracker-view-tabs button { white-space: nowrap; }
-.offer-tracker-table-toolbar { flex-wrap: wrap; }

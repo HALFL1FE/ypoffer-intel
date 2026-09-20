@@ -1,5 +1,6 @@
 import type { UiLanguage } from "../../shared/i18n";
 import { notifyAuthFailure } from "../../shared/api/client";
+import { mergeMerchantMonths } from "../chatbot/report/trendReports";
 import { consumeSseResponse } from "../../shared/stream/sse";
 import {
   normalizeAgentResultView,
@@ -585,7 +586,7 @@ function missingDataResponse(language: UiLanguage): string {
 
 function rowMonth(row: Row): string {
   const value = text(firstValue(row, ["month", "monthKey", "reportMonth", "reportMonthKey", "date"]), 40);
-  const match = value.match(/(20\d{2})[-\/]?(0?[1-9]|1[0-2])/);
+  const match = value.match(/(20\d{2})[-\/]?(1[0-2]|0?[1-9])(?!\d)/);
   return match?.[1] && match[2] ? `${match[1]}-${match[2].padStart(2, "0")}` : value.slice(0, 7);
 }
 
@@ -597,6 +598,24 @@ function monthlyData(row: Row, metric?: string): Record<string, unknown> {
   };
   if (metric) result.value = rounded(metricValue(row, metric));
   return result;
+}
+
+// 完整商户月度数据保留缺失值，避免把仅有月份的记录展示为零业绩。
+function merchantMonthlyData(row: Row): Record<string, unknown> {
+  const fields: Record<string, string[]> = {
+    clicks: ["clicks", "Clicks", "totalClicks"], orders: ["orders", "orderCount"],
+    revenue: ["salesAmount", "revenue"], commission: ["affCommission", "affiliatePayout"],
+    payout: ["allCommission", "payout"], epc: ["epc", "affEpc"], allEpc: ["allEpc"],
+    aov: ["aov"], conversionRate: ["conversionRate"], dpv: ["dpv"], atc: ["atc"]
+  };
+  const metrics: Record<string, number> = {};
+  Object.entries(fields).forEach(([key, aliases]) => {
+    const raw = firstValue(row, aliases);
+    if (raw === undefined) return;
+    const value = Number(String(raw).replace(/[$,%]/g, "").replace(/,/g, ""));
+    if (Number.isFinite(value)) metrics[key] = rounded(value);
+  });
+  return { month: rowMonth(row), metrics };
 }
 
 function tierDistribution(rows: readonly Row[]): Record<string, number> {
@@ -800,10 +819,10 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     if (existing) emitStep({ ...existing, ...update });
   }
 
-  async function requestJson<T extends JsonPayload>(url: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+  async function requestJson<T extends JsonPayload>(url: string, init: RequestInit = {}, signal?: AbortSignal, timeoutMs = 10_000): Promise<T> {
     const controller = new AbortController();
     const linked = linkSignal(signal, controller.signal);
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const result = await fetcher(url, {
         credentials: "same-origin",
@@ -1041,12 +1060,17 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     }
   }
 
-  async function merchantMonthlyRows(row: Row, months: number, signal: AbortSignal): Promise<{ rows: Row[]; checkedAt: string | null }> {
+  async function merchantMonthlyRows(row: Row, months: number, signal: AbortSignal, full = false): Promise<{ rows: Row[]; checkedAt: string | null; merchant?: Row }> {
     const id = merchantId(row);
     if (!id) return { rows: [], checkedAt: null };
-    const query = new URLSearchParams({ merchantId: id, months: String(months), minimal: "1" });
+    const query = new URLSearchParams({ merchantId: id, months: String(months), ...(full ? { limit: "50" } : { minimal: "1" }) });
     try {
-      const payload = await requestJson<JsonPayload>("/api/ui/db/merchant?" + query.toString(), {}, signal);
+      const payload = await requestJson<JsonPayload>("/api/ui/db/merchant?" + query.toString(), {}, signal, full ? 30_000 : 10_000);
+      if (full) {
+        const monthly = mergeMerchantMonths(payload)[0]?.monthly;
+        const rows = Array.isArray(monthly) ? monthly.filter(isRecord).sort((a, b) => rowMonth(b).localeCompare(rowMonth(a))) : [];
+        return { rows, checkedAt: text(payload.checkedAt, 80) || null, ...(isRecord(payload.merchant) ? { merchant: payload.merchant } : {}) };
+      }
       const rows = Array.isArray(payload.monthlyAmazonMetrics)
         ? payload.monthlyAmazonMetrics.filter(isRecord)
         : Array.isArray(payload.monthlyMetrics)
@@ -1170,11 +1194,11 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
         headline: `${merchantName(row)} · Top ASIN`, note
       }, "cache", dataAsOf);
     }
-    const monthlyResult = await merchantMonthlyRows(row, 12, signal);
-    const monthly = monthlyResult.rows.map((item) => monthlyData(item));
+    const monthlyResult = await merchantMonthlyRows(row, 12, signal, true);
+    const monthly = monthlyResult.rows.map(merchantMonthlyData);
     const name = merchantName(row);
     const data: Record<string, unknown> = {
-      ...merchantData(row),
+      ...merchantData({ ...row, ...monthlyResult.merchant }),
       ranks: {},
       comparisons: {
         global: aggregate(offers),
@@ -1190,7 +1214,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       monthlyDataSource: monthly.length ? "database" : "unavailable",
       monthlyNote: monthly.length ? "Monthly rows are loaded from the database." : "Monthly data is unavailable; cached offer metrics are retained.",
       headline: name + " merchant analysis",
-      note: "Metrics are computed from the current offer cache; monthly rows are read-only database data."
+      note: "Merchant details and merged monthly rows use the full database endpoint; missing merchant fields and comparisons use the current offer cache."
     };
     return success(data, monthly.length ? "mixed" : "cache", monthlyResult.checkedAt || options.dataAsOf || null);
   }
@@ -1524,6 +1548,17 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       if (typeof value === "string" || typeof value === "boolean") return text(value, 120);
       return "";
     };
+    if (item.call.name === "merchant_analysis" && Array.isArray(data.monthly) && data.monthly.length) {
+      const keys = ["clicks", "orders", "revenue", "commission", "payout", "epc", "aov", "conversionRate"];
+      const labels = currentLanguage === "en"
+        ? ["Clicks", "Orders", "Revenue", "Affiliate commission", "Total commission", "Affiliate EPC", "AOV", "CVR"]
+        : ["点击", "订单", "销售额", "联盟佣金", "总佣金", "联盟 EPC", "客单价", "转化率"];
+      return normalizeAgentResultView({ id: item.call.id, toolName: item.call.name, kind: "table", status: "done",
+        title: text(data.headline, 180), source: result.source.dataSource, dataAsOf: result.source.dataAsOf,
+        columns: labels, rows: data.monthly.filter(isRecord).map(row => ({ label: text(row.month, 20),
+          values: keys.map(key => scalar(key, isRecord(row.metrics) ? row.metrics[key] : undefined) || (currentLanguage === "en" ? "Not provided" : "未提供")) })),
+        metrics: [], message: text(data.monthlyNote, 800), estimated: false, partial: false });
+    }
     if (item.call.name === "asin_analysis") {
       const summarySource = Array.isArray(data.rows) ? data.rows.filter(isRecord) : [];
       const monthlySource = Array.isArray(data.monthly) ? data.monthly.filter(isRecord) : [];
@@ -1678,7 +1713,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
         if (Array.isArray(data.monthly) && data.monthly.length) {
           lines.push("| Month | Value |\n| --- | --- |");
           data.monthly.forEach((row) => {
-            if (isRecord(row)) lines.push("| " + text(row.month, 20) + " | " + text(isRecord(row.metrics) ? row.metrics.revenue : row.value, 40) + " |");
+            if (isRecord(row)) lines.push("| " + text(row.month, 20) + " | " + (text(isRecord(row.metrics) ? row.metrics.revenue : row.value, 40) || (language === "en" ? "Not provided" : "未提供")) + " |");
           });
         }
       } else if (item.call.name === "tier_analysis" && Array.isArray(data.merchants)) {

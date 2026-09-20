@@ -4,6 +4,11 @@ import { buildTrendReport, mergeMerchantMonths } from "./trendReports";
 import { resolveReportQuery } from "./reportQuery";
 
 describe("trendReports", () => {
+  it("跨年合并保留十月至十二月，不误读为一月", () => {
+    const monthly = ["2025-10", "2025-11", "2025-12", "2026-01"].map(month => ({ month, revenue: 1 }));
+    const result = mergeMerchantMonths({ merchantId: "362737", monthlyAmazonMetrics: monthly });
+    expect(result[0]?.monthly).toEqual(monthly);
+  });
   it("优先使用真实月度数据并计算首末月变化", () => {
     const rows = [{
       ...parityOffers[0],

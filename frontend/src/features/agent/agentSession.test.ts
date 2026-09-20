@@ -48,6 +48,28 @@ function streamResponse(content: string): Response {
 }
 
 describe("createAgentSession", () => {
+  it("商户完整详情合并历史月份并直接展示月度表，空指标不补零", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      expect(url.searchParams.has("minimal")).toBe(false);
+      expect(url.searchParams.get("limit")).toBe("50");
+      expect(url.searchParams.get("months")).toBe("12");
+      return response({ ok: true, merchant: { merchantId: "398679", merchantName: "Tapo" },
+        monthlyAmazonMetrics: [{ month: "2026-01", revenue: 10, orders: 1 }, { month: "2025-12" }],
+        monthlyAggregateMetrics: [{ month: "2026-01", revenue: 20 }, { month: "2025-11", revenue: 30 }],
+        checkedAt: "2026-09-20" });
+    });
+    const session = createAgentSession({ offers, language: "zh", fetcher, enableTrace: false, enableQuestionLogging: false });
+    const result = await session.executeTool({ callId: "merchant-full", toolName: "merchant_analysis",
+      arguments: { merchant: "398679" }, prompt: "查询历史月度表现", signal: new AbortController().signal });
+    const data = (result.toolResult.result as { data: { monthly: Array<{ month: string; metrics: Record<string, number> }> } }).data;
+    expect(data.monthly.map(row => row.month)).toEqual(["2026-01", "2025-12", "2025-11"]);
+    expect(data.monthly[0]?.metrics.revenue).toBe(20);
+    expect(data.monthly[1]?.metrics).toEqual({});
+    expect(result.resultView?.kind).toBe("table");
+    expect(result.resultView?.rows.map(row => row.label)).toEqual(["2026-01", "2025-12", "2025-11"]);
+    expect(result.resultView?.rows[1]?.values.every(value => value === "未提供")).toBe(true);
+  });
   it("连续两轮查询将 Top ASIN 按原顺序传给追问规划", async () => {
     const asins = ["B0D2HKCMBP", "B0GQ3MD31D", "B0CS3JBP67", "B0D2HHDKTD", "B09BVXT8TJ"];
     const contexts: unknown[] = [];
