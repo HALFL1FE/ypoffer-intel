@@ -305,12 +305,13 @@ def _build_specs() -> dict[str, dict[str, Any]]:
                         },
                         "minItems": 1,
                         "maxItems": 5,
-                    }
+                    },
+                    "view": {"type": "string", "enum": ["details", "performance"]},
                 },
                 "required": ["asins"],
                 "additionalProperties": False,
             },
-            "argument_fields": ("asins",),
+            "argument_fields": ("asins", "view"),
         },
         "promotion_analysis": {
             "description_zh": "基于用户上传的商家清单，查询推广前后商家、按商家统计媒体数量、媒体、链接、品类或历史表现；没有上传清单时不要调用。",
@@ -434,6 +435,11 @@ def validate_tool_arguments(tool_name: str, arguments: object) -> tuple[dict | N
         if error:
             return None, error
         cleaned["asins"] = asins
+        if "view" in arguments:
+            view, error = _enum(arguments["view"], "view", ("details", "performance"))
+            if error:
+                return None, error
+            cleaned["view"] = view
     elif tool_name == "promotion_analysis":
         cleaned, error = validate_promotion_arguments(arguments)
         if error:

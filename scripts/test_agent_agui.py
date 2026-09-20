@@ -34,6 +34,14 @@ class FakeTarget:
 
 
 class AgentAguiTests(unittest.TestCase):
+    def test_asin_followup_context_reaches_planning(self):
+        body = self.body()
+        asins = ["B0D2HKCMBP", "B09BVXT8TJ"]
+        body["state"]["offerIntelligence"]["asinContext"] = asins
+        with patch("agent_agui.plan_agent_request", return_value=(200, {"ok": True, "content": "test", "toolCalls": []})) as planning:
+            list(agent_agui.generate_agui_events(body))
+        self.assertEqual(planning.call_args.args[0]["asinContext"], asins)
+
     def test_six_top_asin_results_flow_through_two_batches_and_signed_synthesis(self):
         merchants = [("406220", "AOCHUAN"), ("362448", "Midland Radio"), ("380928", "DS18"),
                      ("384704", "ISOtunes"), ("385315", "SABRENT"), ("362602", "Productech")]

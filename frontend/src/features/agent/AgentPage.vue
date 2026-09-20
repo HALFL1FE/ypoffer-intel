@@ -35,12 +35,15 @@ import {
   type AgentTimelineStep
 } from "./agentModel";
 
+import { asinContextFromViews } from "./agentAsinContext";
+
 export interface AgentRunRequest {
   readonly prompt: string;
   readonly language: UiLanguage;
   readonly history: readonly { readonly role: "user" | "assistant"; readonly content: string }[];
   readonly memory: AgentMemoryState;
   readonly memoryText: string;
+  readonly asinContext?: readonly string[];
   readonly signal: AbortSignal;
   readonly promotionAttachment?: AgentPromotionAttachment;
   readonly onToken?: (token: string) => void;
@@ -522,6 +525,7 @@ async function submit(): Promise<void> {
   const requestPrompt = command ? command.command.template(command.value, requestLanguage) : prompt;
   const initialHistory = replay?.history || (props.session && !localSessionOverride.value ? props.session.getState().history : history());
   const initialMemory = replay?.memory || memory.value;
+  const asinContext = replay ? [] : asinContextFromViews(messages.value.filter((item) => item.role === "assistant").at(-1)?.resultViews || []);
   const promotionAttachment = replay ? undefined : attachmentStore.get() || undefined;
   if (command?.command.key === "promotion" && !promotionAttachment) {
     error.value = requestLanguage === "zh"
@@ -567,6 +571,7 @@ async function submit(): Promise<void> {
         prompt: requestPrompt,
         language: requestLanguage,
         history: currentState.history,
+        asinContext,
         memoryText: agentMemoryPromptText(memory.value, props.language),
         signal: abortController.signal,
         promotionAttachment
@@ -617,6 +622,7 @@ async function submit(): Promise<void> {
       prompt: requestPrompt,
       language: requestLanguage,
       history: currentHistory,
+      asinContext,
       memory: initialMemory,
       memoryText: agentMemoryPromptText(initialMemory, requestLanguage),
       signal: abortController.signal,

@@ -268,6 +268,17 @@ def test_merchant_top_asins_arguments_and_result_contract():
         assert validate_tool_result("merchant_analysis", {"ok": True, "data": empty})[1] is None
 
 
+def test_asin_details_view_contract():
+    definition = get_agent_tool_definitions("en", ["asin_analysis"])[0]
+    assert definition["parameters"]["properties"]["view"]["enum"] == ["details", "performance"]
+    for view in ("details", "performance"):
+        cleaned, error = validate_tool_arguments("asin_analysis", {"asins": ["B09DPRB3TR"], "view": view})
+        assert error is None
+        assert cleaned["view"] == view
+    assert validate_tool_arguments("asin_analysis", {"asins": ["B09DPRB3TR"], "view": "unknown"})[1]
+    assert validate_tool_arguments("asin_analysis", {"asins": ["B09DPRB3TR"]})[1] is None
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

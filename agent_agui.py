@@ -278,6 +278,7 @@ def _planning_events(body: dict, request_bytes: int, state_seed: dict) -> Iterab
         "question": question,
         "language": language,
         "enabledTools": enabled_tools,
+        "asinContext": state_seed.get("asinContext", []),
         **({"promotionContext": promotion_context} if promotion_context else {}),
     }
     status, planning = plan_agent_request(planning_request, request_bytes)
@@ -323,6 +324,7 @@ def _planning_events(body: dict, request_bytes: int, state_seed: dict) -> Iterab
         legacy_parity=state_seed.get("legacyParity") is True,
         promotion_context=promotion_context,
     )
+    state["asinContext"] = state_seed.get("asinContext", [])
     yield _snapshot(state)
     yield from _emit_tool_batch(calls)
     yield _run_finished(body, {"status": "tools", "authority": "python-registry"})
@@ -372,6 +374,7 @@ def _continuation_events(
         status, planning = plan_agent_request({
             "contractVersion": AGENT_CONTRACT_VERSION,
             "question": state.get("question"),
+            "asinContext": state.get("asinContext", []),
             "language": state.get("language"),
             "enabledTools": [name for name in AGENT_TOOL_NAMES if state.get("promotionContext") or name != "promotion_analysis"],
             **({"promotionContext": state.get("promotionContext")} if isinstance(state.get("promotionContext"), dict) else {}),
@@ -406,6 +409,7 @@ def _continuation_events(
                 promotion_context=state.get("promotionContext") if isinstance(state.get("promotionContext"), dict) else None,
             )
             next_state["omittedTargets"] = omitted_targets[:20]
+            next_state["asinContext"] = state.get("asinContext", [])
             yield _timeline("replan", "planning", "done", "Replan ready")
             yield _snapshot(next_state)
             yield from _emit_tool_batch(retry_calls)

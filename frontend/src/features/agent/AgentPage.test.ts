@@ -4,11 +4,50 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AgentPage, { type AgentRunResult, type AgentRunner } from "./AgentPage.vue";
 import { normalizeAgentResultView } from "../../shared/contracts/agentResult";
-import type { AgentSessionResult, AgentSessionState } from "./agentSession";
+import type { AgentSessionResult, AgentSessionState, AgentViewSession } from "./agentSession";
 import { clearAgentViewSnapshot } from "./agentViewState";
 
 describe("AgentPage", () => {
   beforeEach(() => clearAgentViewSnapshot("modern-agent"));
+
+  it("追问只携带上一轮结果的 ASIN，新对话清空引用", async () => {
+    const asins = ["B0D2HKCMBP", "B0GQ3MD31D", "B0CS3JBP67", "B0D2HHDKTD", "B09BVXT8TJ"];
+    const view = normalizeAgentResultView({ id: "top", toolName: "merchant_analysis", kind: "table", status: "done", title: "Top ASIN",
+      columns: ["商家 ID", "商家", "ASIN"], rows: asins.map((asin, i) => ({ label: String(i + 1), values: ["362653", "Shokz", asin] })) })!;
+    const run = vi.fn<AgentRunner>().mockResolvedValue({ ok: true, status: "done", response: "商品详情", steps: [] })
+      .mockResolvedValueOnce({ ok: true, status: "done", response: "Top ASIN 见表格", steps: [], resultViews: [view] });
+    const wrapper = mount(AgentPage, { props: { language: "zh", run, autoFocus: false } });
+    for (const prompt of ["Shokz top ASIN", "给我这5个ASIN的信息"]) {
+      await wrapper.get('[data-agent-input]').setValue(prompt);
+      await wrapper.get('[data-agent-form]').trigger("submit");
+      await flushPromises();
+    }
+    expect(run.mock.calls[1]![0].asinContext).toEqual(asins);
+    await wrapper.get('[data-agent-action="new"]').trigger("click");
+    await wrapper.get('[data-agent-input]').setValue("这5个ASIN的信息");
+    await wrapper.get('[data-agent-form]').trigger("submit");
+    await flushPromises();
+    expect(run.mock.calls[2]![0].asinContext).toEqual([]);
+    wrapper.unmount();
+  });
+
+  it("受控 session 路径也把上一轮 ASIN 引用传给查询", async () => {
+    const asins = ["B0D2HKCMBP", "B09BVXT8TJ"];
+    const view = normalizeAgentResultView({ id: "top-session", toolName: "merchant_analysis", kind: "table", status: "done", title: "Top ASIN",
+      columns: ["Merchant ID", "Merchant", "ASIN"], rows: asins.map((asin, i) => ({ label: String(i + 1), values: ["362653", "Shokz", asin] })) })!;
+    const session = {
+      getState: () => ({ status: "done", history: [{ role: "user", content: "Shokz top ASIN" }, { role: "assistant", content: "Top ASIN" }],
+        steps: [], response: "Top ASIN", partial: false, omittedTargets: [], resultViews: [view], hasMemory: false }),
+      submit: vi.fn(async () => ({ ok: true, status: "done" as const, response: "详情", steps: [] })),
+      stop: vi.fn(), newConversation: vi.fn(), onChange: vi.fn(() => () => {})
+    } as unknown as AgentViewSession;
+    const wrapper = mount(AgentPage, { props: { language: "en", run: vi.fn(), session, autoFocus: false } });
+    await wrapper.get('[data-agent-input]').setValue("Give me these ASIN details");
+    await wrapper.get('[data-agent-form]').trigger("submit");
+    await flushPromises();
+    expect(session.submit).toHaveBeenCalledWith(expect.objectContaining({ asinContext: asins }), expect.anything());
+    wrapper.unmount();
+  });
 
   it("keeps result components with their answer after a follow-up and clears them on new conversation", async () => {
     const view = normalizeAgentResultView({ id: "result-1", toolName: "merchant_analysis", kind: "metric", status: "done", title: "Merchant metrics", metrics: [{ label: "EPC", value: "1.2" }] })!;

@@ -88,14 +88,14 @@ function normalizeMetrics(value: unknown): AgentResultMetric[] {
   return result;
 }
 
-function normalizeRows(value: unknown): AgentResultRow[] {
+function normalizeRows(value: unknown, maximum = 120): AgentResultRow[] {
   const result: AgentResultRow[] = [];
   for (const item of Array.isArray(value) ? value : []) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const record = item as Record<string, unknown>;
     const label = text(record.label || record.name, 120);
     // Preserve positional duplicates: values map one-to-one to columns.
-    const values = boundedValues(record.values, 8, 120);
+    const values = boundedValues(record.values, 8, maximum);
     if (!label || !values.length || result.length >= 100) continue;
     result.push({ label, values });
   }
@@ -144,7 +144,7 @@ export function normalizeAgentResultView(value: unknown): AgentResultView | null
   const dataAsOf = text(record.dataAsOf, 48) || null;
   const metrics = normalizeMetrics(record.metrics);
   const columns = safeList(record.columns, 8, 80);
-  const rows = normalizeRows(record.rows);
+  const rows = normalizeRows(record.rows, toolName === "asin_analysis" ? 500 : 120);
   const message = text(record.message, 800);
   return {
     id,
