@@ -3,6 +3,8 @@ import { computed, ref } from "vue";
 import { toNullableNumber } from "../../shared/format/number";
 import type {
   OfferRecord,
+  OfferChannel,
+  OfferChannelSelections,
   OfferTrackerDateRange,
   OfferTrackerFilters,
   OfferTrackerFilterInput,
@@ -25,6 +27,7 @@ import {
   paginateOfferTrackerRows,
   updateOfferTrackerSelection
 } from "./offerTrackerModel";
+import { suggestNormalizedChannel } from "./offerChannels";
 
 export type OfferTrackerLoader = (
   range: OfferTrackerDateRange
@@ -50,6 +53,8 @@ export function useOfferTracker(options: UseOfferTrackerOptions) {
   const draftFilters = ref<OfferTrackerFilters>(initialFilters);
   const search = ref("");
   const view = ref<OfferTrackerView>("offers");
+  const activeTab = ref<"offers" | OfferChannel>("offers");
+  const channelSelections = ref<OfferChannelSelections>({});
   const page = ref(1);
   const pageSize = 25;
   const selectedKeys = ref<ReadonlySet<string>>(new Set<string>());
@@ -61,12 +66,23 @@ export function useOfferTracker(options: UseOfferTrackerOptions) {
   const allRows = computed<readonly OfferTrackerRow[]>(() => sourceRows.value.map((row) => (
     normalizeOfferRecord(row, rules.value)
   )));
-  const filteredRows = computed<readonly OfferTrackerRow[]>(() => filterOfferTrackerRows(
+  const masterRows = computed<readonly OfferTrackerRow[]>(() => filterOfferTrackerRows(
     sourceRows.value,
     filters.value,
     search.value,
     rules.value
   ));
+  const filteredRows = computed<readonly OfferTrackerRow[]>(() => {
+    const channel = activeTab.value;
+    if (channel === "offers") return masterRows.value;
+    const order = { high: 0, recommended: 1, "low-aov": 2 };
+    const rows = masterRows.value.flatMap(row => {
+      const decision = channelSelections.value[row.merchantId]?.[channel] ?? suggestNormalizedChannel(row, channel);
+      if (!decision.included || !decision.asins.length) return [];
+      return [{ ...row, asins: decision.asins, priority: { ...row.priority, key: decision.grade, order: order[decision.grade] } }];
+    });
+    return filters.value.revenueSort === "priority" ? rows.sort((a, b) => a.priority.order - b.priority.order) : rows;
+  });
   const pageData = computed(() => paginateOfferTrackerRows(filteredRows.value, page.value, pageSize));
   const pageRows = computed(() => pageData.value.rows);
   const selectionSummary = computed(() => offerTrackerSelectionSummary(
@@ -185,6 +201,11 @@ export function useOfferTracker(options: UseOfferTrackerOptions) {
     view.value = nextView === "products" ? "products" : "offers";
   }
 
+  function setTab(tab: "offers" | OfferChannel): void {
+    activeTab.value = tab;
+    page.value = 1;
+  }
+
   function toggleRow(key: string, selected: boolean): void {
     const rows = pageRows.value.filter((row) => row.key === key);
     selectedKeys.value = updateOfferTrackerSelection(rows, selected, selectedKeys.value);
@@ -203,7 +224,8 @@ export function useOfferTracker(options: UseOfferTrackerOptions) {
   }
 
   function exportRows(selectedOnly: boolean): readonly OfferRecord[] {
-    return offerTrackerExportRows(filteredRows.value, selectedKeys.value, selectedOnly);
+    // The master sheet always covers the applied filters, independent of the open channel.
+    return offerTrackerExportRows(selectedOnly ? filteredRows.value : masterRows.value, selectedKeys.value, selectedOnly);
   }
 
   return {
@@ -212,6 +234,10 @@ export function useOfferTracker(options: UseOfferTrackerOptions) {
     draftFilters,
     search,
     view,
+    activeTab,
+    channelSelections,
+    masterRows,
+    setTab,
     page,
     pageSize,
     selectedKeys,
