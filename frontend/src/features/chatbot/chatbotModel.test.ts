@@ -41,6 +41,15 @@ const offers = [
 ] as const;
 
 describe("chatbotModel", () => {
+  it("按数字 ID 或完整名称识别 Midland Radio，不把名称内的 id 当成标记", () => {
+    const fixture = [{ merchantId: "362448", merchantName: "Midland Radio" }];
+    for (const input of ["362448", "Midland Radio", "362448 Midland Radio", "ID362448", "merchantId:362448", "商家ID：362448"]) {
+      const result = resolveChatbotMerchant(input, fixture);
+      expect(result.status).toBe("resolved");
+      expect(result.matches[0]?.offer.merchantId).toBe("362448");
+    }
+    expect(resolveChatbotMerchant("999999 Midland Radio", fixture)).toEqual({ status: "not_found", matches: [] });
+  });
   it("normalizes text and canonicalizes all supported tier labels", () => {
     expect(normalizeChatbotText(" Beauty & Personal Care ")).toBe("beauty and personal care");
     expect(canonicalChatbotTier("tier 2")).toBe("Tier 2");

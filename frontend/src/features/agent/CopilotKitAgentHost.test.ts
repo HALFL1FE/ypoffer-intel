@@ -4,11 +4,31 @@ import CopilotKitAgentHost from "./CopilotKitAgentHost.vue";
 import { emptyAgentMemory } from "./agentModel";
 import type { AgentPromotionAttachment } from "./agentAttachment";
 import type { AgentToolExecutionResponse } from "./agentSession";
+import { createAgentSession } from "./agentSession";
 
 vi.mock("@copilotkit/vue/v2", () => ({ CopilotKitProvider: { name: "Provider", props: ["frontendTools"], template: "<slot />" } }));
 vi.mock("./CopilotKitAgentRuntime.vue", () => ({ default: { name: "Runtime", props: ["beginRun"], template: "<div />" } }));
 
 describe("CopilotKit local result projection", () => {
+  it("Top ASIN 综合失败时保留本轮真实工具结果，不重复规划", async () => {
+    const agent = createAgentSession({ offers: [{ merchantId: "362448", merchantName: "Midland Radio", topAsins: ["B09PFBWV55"] }],
+      language: "zh", enableTrace: false, enableQuestionLogging: false });
+    const fallbackRun = vi.fn();
+    const wrapper = mount(CopilotKitAgentHost, { props: { language: "zh", endpoint: "/api/copilotkit", enabled: true,
+      fallbackRun, toolExecutor: agent.executeTool } });
+    const session = wrapper.findComponent({ name: "Runtime" }).props("beginRun")({ prompt: "Midland Radio top asin", language: "zh",
+      history: [], memory: emptyAgentMemory(), memoryText: "", signal: new AbortController().signal });
+    await session.execute({ callId: "r1c1", toolName: "merchant_analysis", arguments: { merchant: "362448", view: "top_asins" } });
+    await session.execute({ callId: "r1c2", toolName: "merchant_analysis", arguments: { merchant: "999999", view: "top_asins" } });
+    const result = await session.complete("", { synthesisFailed: true, partial: true, omittedTargets: [] });
+    expect(fallbackRun).not.toHaveBeenCalled();
+    expect(result.response).toContain("B09PFBWV55");
+    expect(result.response).toContain("Midland Radio");
+    expect(result.response).toContain("999999");
+    expect(result).toMatchObject({ ok: true, partial: true, fallbackDelivered: true });
+    expect(result.resultViews).toHaveLength(2);
+    wrapper.unmount();
+  });
   it("sends only the bounded tool result to Python, keeping charts and full UI rows local", async () => {
     const toolResult = { callId: "r1c1", result: { ok: true } };
     const toolExecutor = vi.fn(async (): Promise<AgentToolExecutionResponse> => ({ toolResult, resultView: { id: "trend-1", toolName: "trend", kind: "table", status: "done", title: "Trend", source: "cache", dataAsOf: null, estimated: false, partial: false, metrics: [], columns: [], rows: [], message: "" }, memoryEvent: { kind: "tool_success" } }));

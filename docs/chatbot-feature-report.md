@@ -1,5 +1,7 @@
 # Chatbot 完整档案
 
+> **Agent 商家 Top ASIN 提取（2026-09-20）：** `merchant_analysis` 新增可选 `view=top_asins`，按商家名称或数字 ID 从当前 Offer 快照提取最多 5 个 ASIN；省略 view 仍走普通商家分析。多商家分别查询，已知 ASIN 表现仍使用 `asin_analysis`。保留快照顺序：已知排名版本按期间单品正营收降序，同营收及剩余位置按 ASIN 编码排序，不保证每个商品都有成交；未知版本明确标记口径未知。结果携带快照区间、日期、排名版本及空缺状态，不查询其他期间或任意 Top N，不额外请求月度数据。结构化表格与综合失败兜底保留商家归属及 ASIN，原始列表不写入持久化记忆。商家识别已修复 Midland Radio 中 `id` 被误认作 ID 标记的问题。
+
 > 更新日期：2026-09-11 · 分支：`FRONTEND-VUE-MIGRATION`
 
 > **M7 当前实现说明：** 本文中带有 Legacy、`public/app.js`、旧辅助脚本或 `frontend/src/legacy/` 的章节是迁移历史与行为来源记录，不再代表当前文件路径。生产前端现由 `frontend/src/runtime/modernApp.ts`、`frontend/src/entry.ts`、`frontend/src/features/chatbot/` 与 `frontend/src/features/agent/` 承载；认证入口仅为 `public/auth.js`。旧运行时、旧页面 DOM 和运行时回退开关已删除，回滚使用上一份可部署构建。

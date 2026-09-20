@@ -335,6 +335,7 @@
       window.CHATBOT_DATA = {
         summary: offersResp.summary || {},
         offers: offersResp.offers || [],
+        asinRankingVersion: offersResp.asinRankingVersion || null,
         paymentRecords: offersResp.paymentRecords || [],
         startDate: offersResp.startDate || "",
         endDate: offersResp.endDate || "",

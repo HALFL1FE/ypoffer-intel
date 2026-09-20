@@ -34,6 +34,52 @@ class FakeTarget:
 
 
 class AgentAguiTests(unittest.TestCase):
+    def test_six_top_asin_results_flow_through_two_batches_and_signed_synthesis(self):
+        merchants = [("406220", "AOCHUAN"), ("362448", "Midland Radio"), ("380928", "DS18"),
+                     ("384704", "ISOtunes"), ("385315", "SABRENT"), ("362602", "Productech")]
+        question = "\n".join("\t".join(row) for row in merchants) + "；以上商家的top asin可以帮我提取吗"
+        calls = [{"id": f"r1c{i+1}", "name": "merchant_analysis", "arguments": {"merchant": mid, "view": "top_asins"}}
+                 for i, (mid, _) in enumerate(merchants)]
+        run_id = "ar_top_asins_12345678"
+        with patch.dict(os.environ, {"OI_SESSION_SECRET": "top-asins-test-secret"}):
+            proof = issue_plan_proof(run_id, question, calls, int(time.time()) + 60)
+            body = self.body()
+            body["messages"] = [{"id": "user-1", "role": "user", "content": question}]
+            with patch("agent_agui.plan_agent_request", return_value=(200, {"ok": True, "agentRunId": run_id, "planProof": proof, "toolCalls": calls})):
+                events = list(agent_agui.generate_agui_events(body))
+            self.assertEqual(sum(e["type"] == "TOOL_CALL_START" for e in events), 4)
+            body["state"] = next(e["snapshot"] for e in events if e["type"] == "STATE_SNAPSHOT")
+
+            def add_results(first, last):
+                for i in range(first, last):
+                    mid, name = merchants[i]
+                    data = {"merchant": {"id": mid, "name": name}, "topAsins": [f"B00000000{i}"],
+                            "asinRanking": {"status": "available", "basis": "unknown", "limit": 5, "returned": 1,
+                                            "version": None, "startDate": None, "endDate": None, "dataAsOf": None}}
+                    body["messages"].append({"id": f"tool-{i}", "role": "tool", "toolCallId": calls[i]["id"],
+                        "content": json.dumps({"toolResult": {"result": {"ok": True, "data": data,
+                            "source": {"dataSource": "cache", "dataAsOf": None, "estimated": False}}}})})
+
+            add_results(0, 4)
+            events = list(agent_agui.generate_agui_events(body))
+            self.assertEqual([e["toolCallId"] for e in events if e["type"] == "TOOL_CALL_START"], ["r1c5", "r1c6"])
+            body["state"] = next(e["snapshot"] for e in events if e["type"] == "STATE_SNAPSHOT")
+            add_results(4, 6)
+            captured = []
+
+            def stream(_prompt, _system, **kwargs):
+                captured.append(kwargs["messages"][-1]["content"])
+                kwargs["on_complete"]({"provider": "test"})
+                yield "六家商家的 Top ASIN"
+
+            events = list(agent_agui.generate_agui_events(body, 100, stream))
+            self.assertEqual(events[-1]["type"], "RUN_FINISHED")
+            self.assertEqual(len(captured), 1)
+            for i, (mid, name) in enumerate(merchants):
+                self.assertIn(mid, captured[0])
+                self.assertIn(name, captured[0])
+                self.assertIn(f"B00000000{i}", captured[0])
+
     def test_local_server_exposes_the_same_agui_route_as_vercel(self):
         source = (ROOT / "server.py").read_text(encoding="utf-8")
         self.assertIn("from agent_agui import handle_agui_request", source)

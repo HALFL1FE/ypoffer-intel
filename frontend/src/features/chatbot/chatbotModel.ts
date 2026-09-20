@@ -182,7 +182,7 @@ export function resolveChatbotCategory(prompt: string, categories: readonly stri
 }
 
 function merchantIdFromPrompt(prompt: string): string {
-  const labeled = text(prompt).match(/(?:merchant\s*id|merchantid|商户\s*id|商家\s*id|id)\s*[:#]?\s*([a-z0-9_-]+)/i);
+  const labeled = text(prompt).match(/(?:\bmerchant\s*id\b|\bmerchantid\b|商户\s*id|商家\s*id|\bid)\s*[:：#]?\s*(\d+)\b/i);
   if (labeled?.[1]) return normalizeRecordKey(labeled[1]);
   const numeric = text(prompt).match(/\b\d{4,}\b/);
   return numeric?.[0] || "";
@@ -218,7 +218,10 @@ export function resolveChatbotMerchant(
   const matches = merchantMatches(offers, prompt);
   if (!matches.length) return { status: "not_found", matches: [] };
   const id = merchantIdFromPrompt(prompt);
-  if (id) return { status: "resolved", matches: matches.filter((match) => normalizeRecordKey(firstText(match.offer, MERCHANT_ID_KEYS)) === id) };
+  if (id) {
+    const exact = matches.filter((match) => normalizeRecordKey(firstText(match.offer, MERCHANT_ID_KEYS)) === id);
+    return { status: exact.length ? "resolved" : "not_found", matches: exact };
+  }
   const first = matches[0];
   const second = matches[1];
   const ambiguous = Boolean(second && first && first.score === second.score);
