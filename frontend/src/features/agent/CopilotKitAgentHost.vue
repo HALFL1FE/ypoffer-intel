@@ -58,6 +58,7 @@ function beginRun(request: AgentRunRequest): AgentToolRunSession {
   toolSession?.dispose();
   const memoryEvents: NonNullable<Awaited<ReturnType<AgentRunner>>["memoryEvents"]>[number][] = [];
   const resultViews: NonNullable<Awaited<ReturnType<AgentRunner>>["resultViews"]>[number][] = [];
+  let topAsinCallsOnly = true;
   const session: AgentToolRunSession = {
     language: request.language,
     history: request.history,
@@ -65,6 +66,7 @@ function beginRun(request: AgentRunRequest): AgentToolRunSession {
     promotionAttachment: request.promotionAttachment,
     direct: () => props.fallbackRun(request),
     async execute(toolRequest) {
+      topAsinCallsOnly = topAsinCallsOnly && toolRequest.toolName === "merchant_analysis" && toolRequest.arguments.view === "top_asins";
       const result = await props.toolExecutor({
         callId: toolRequest.callId,
         toolName: toolRequest.toolName as AgentToolName,
@@ -83,6 +85,20 @@ function beginRun(request: AgentRunRequest): AgentToolRunSession {
     },
     async complete(response, options) {
       if (options.synthesisFailed) {
+        if (topAsinCallsOnly && resultViews.length) {
+          // 综合失败时直接展示本轮已完成的查询，避免重新规划丢失结果。
+          const cell = (value: string) => value.replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ");
+          const response = resultViews.map((view) => {
+            const lines = [view.title, view.message];
+            if (view.rows.length) {
+              lines.push(`| # | ${view.columns.map(cell).join(" | ")} |`, `| --- | ${view.columns.map(() => "---").join(" | ")} |`);
+              lines.push(...view.rows.map((row) => `| ${cell(row.label)} | ${row.values.map(cell).join(" | ")} |`));
+            }
+            return lines.filter(Boolean).join("\n\n");
+          }).join("\n\n");
+          return { ok: true, status: "done", response, steps: [], partial: options.partial,
+            omittedTargets: options.omittedTargets, memoryEvents, resultViews, fallbackDelivered: true };
+        }
         const fallback = await props.fallbackRun(request);
         return { ...fallback, fallbackDelivered: fallback.ok };
       }

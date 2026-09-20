@@ -233,6 +233,32 @@ def test_synthesis_provider_error_is_controlled():
     with_secret(run)
 
 
+def test_top_asins_survive_synthesis_and_view_tampering_is_rejected():
+    def run():
+        body = signed_request()
+        args = {"merchant": "362448", "view": "top_asins"}
+        body["question"] = "362448 Midland Radio 的top asin"
+        body["planProofs"] = [agent_contract.issue_plan_proof(RUN_ID, body["question"],
+            [{"id": "r1c1", "name": "merchant_analysis", "arguments": args}], int(time.time()) + 300)]
+        item = body["toolResults"][0]
+        item["arguments"] = args.copy()
+        item["result"]["data"] = {
+            "merchant": {"id": "362448", "name": "Midland Radio"}, "topAsins": ["B09PFBWV55"],
+            "asinRanking": {"status": "available", "basis": "unknown", "limit": 5, "returned": 1,
+                            "version": None, "startDate": None, "endDate": None, "dataAsOf": None},
+        }
+        targets, captured = invoke_stream_handlers(body)
+        assert [t.status for t in targets] == [200, 200]
+        for request in captured:
+            assert "B09PFBWV55" in request["messages"][-1]["content"]
+            assert "asinRanking" in request["system_prompt"]
+        item["arguments"]["view"] = "overview"
+        targets, _ = invoke_stream_handlers(body)
+        for target in targets:
+            assert_error(target, 409, "run_binding_failed")
+    with_secret(run)
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

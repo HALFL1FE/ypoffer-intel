@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import copy
+import datetime as dt
 import json
 import math
 import re
@@ -63,7 +64,7 @@ AGENT_RESULT_FIELDS = {
         "merchant", "tier", "category", "metrics", "ranks", "comparisons",
         "strengths", "weaknesses", "paymentRisk", "peers", "latestMonth",
         "monthly", "monthlyDataAvailable", "monthlyDataSource", "monthlyNote",
-        "headline", "note",
+        "headline", "note", "topAsins", "asinRanking",
     ),
     "category_analysis": (
         "category", "merchantCount", "tierDistribution", "aggregates",
@@ -181,15 +182,18 @@ def _text_property(description_zh: str, description_en: str, maximum: int) -> di
 def _build_specs() -> dict[str, dict[str, Any]]:
     return {
         "merchant_analysis": {
-            "description_zh": "查询单个商户的核心指标、分位、品类/Tier/全站对比、同行、付款风险和月度数据。",
-            "description_en": "Get one merchant's core metrics, percentiles, category/Tier/global comparisons, peers, payment risk, and monthly data.",
+            "description_zh": "查询单个商户的核心指标和月度数据；view=top_asins 根据商户名称或 ID 提取当前快照中最多五个 Top ASIN，无需预先提供 ASIN。",
+            "description_en": "Get one merchant's metrics and monthly data; view=top_asins extracts up to five ranked ASINs from the current snapshot by merchant name or ID, without known ASINs.",
             "parameters": {
                 "type": "object",
-                "properties": {"merchant": _text_property("商户名称或商户 ID。", "Merchant name or merchant ID.", 80)},
+                "properties": {
+                    "merchant": _text_property("商户名称或商户 ID。", "Merchant name or merchant ID.", 80),
+                    "view": {"type": "string", "enum": ["overview", "top_asins"], "default": "overview"},
+                },
                 "required": ["merchant"],
                 "additionalProperties": False,
             },
-            "argument_fields": ("merchant",),
+            "argument_fields": ("merchant", "view"),
         },
         "category_analysis": {
             "description_zh": "查询品类汇总、Tier 分布、全站对比和 Top 商户。",
@@ -385,6 +389,11 @@ def validate_tool_arguments(tool_name: str, arguments: object) -> tuple[dict | N
         if error:
             return None, error
         cleaned["merchant"] = cleaned_value
+        if "view" in arguments:
+            view, error = _enum(arguments["view"], "view", ("overview", "top_asins"))
+            if error:
+                return None, error
+            cleaned["view"] = view
     elif tool_name == "category_analysis":
         cleaned_value, error = _string(arguments.get("category"), "category", 120)
         if error:
@@ -529,6 +538,53 @@ def _validate_resolution(resolution: Any) -> tuple[dict | None, dict | None]:
     return copy.deepcopy(resolution), None
 
 
+def _valid_top_asins(data: dict) -> bool:
+    """校验商家 Top ASIN 与同一快照的排序元数据。"""
+    asins = data.get("topAsins")
+    ranking = data.get("asinRanking")
+    if not isinstance(asins, list) or len(asins) > 5:
+        return False
+    if any(not isinstance(asin, str) or not re.fullmatch(r"B[0-9A-Z]{9}", asin) for asin in asins):
+        return False
+    if len(set(asins)) != len(asins) or not isinstance(ranking, dict):
+        return False
+    fields = {"status", "basis", "limit", "returned", "startDate", "endDate", "dataAsOf", "version"}
+    if set(ranking) != fields:
+        return False
+    if type(ranking["limit"]) is not int or ranking["limit"] != 5:
+        return False
+    if type(ranking["returned"]) is not int or ranking["returned"] != len(asins):
+        return False
+    if ranking["status"] not in ("available", "empty", "unavailable"):
+        return False
+    if (ranking["status"] == "available") != bool(asins):
+        return False
+    version = ranking["version"]
+    if version is not None and (type(version) is not int or version < 1):
+        return False
+    basis = "period_revenue_desc_then_asin" if version in (1, 2) else "unknown"
+    if ranking["basis"] != basis:
+        return False
+    for field in ("startDate", "endDate"):
+        value = ranking[field]
+        if value is not None:
+            if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                return False
+            try:
+                dt.date.fromisoformat(value)
+            except ValueError:
+                return False
+    if ranking["startDate"] and ranking["endDate"] and ranking["startDate"] > ranking["endDate"]:
+        return False
+    as_of = ranking["dataAsOf"]
+    if as_of is not None and (not isinstance(as_of, str) or not as_of or len(as_of) > 100):
+        return False
+    merchant = data.get("merchant")
+    return (isinstance(merchant, dict) and set(merchant) == {"id", "name"}
+            and isinstance(merchant["id"], str) and bool(re.fullmatch(r"\d+", merchant["id"]))
+            and isinstance(merchant["name"], str) and bool(merchant["name"]))
+
+
 def validate_tool_result(tool_name: str, result: object) -> tuple[dict | None, dict | None]:
     if tool_name not in _SPECS:
         return None, _error("unsupported_tool", "toolName")
@@ -568,6 +624,9 @@ def validate_tool_result(tool_name: str, result: object) -> tuple[dict | None, d
             return None, _error("invalid_tool_result", "data")
         if not _validate_json_value(data):
             return None, _error("invalid_tool_result", "data")
+        if tool_name == "merchant_analysis" and ("topAsins" in data or "asinRanking" in data):
+            if not _valid_top_asins(data):
+                return None, _error("invalid_tool_result", "data")
         normalized["data"] = copy.deepcopy(data)
     else:
         error_code = result.get("errorCode", "tool_error")

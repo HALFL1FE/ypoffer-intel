@@ -939,12 +939,20 @@ function chatbotSession(snapshot: AppBootstrapData): ChatbotSession {
 
 function agentSession(snapshot: AppBootstrapData): AgentSession {
   if (!modernAgentSession) {
+    const data = chatbotRecord(snapshot);
+    const sources = isRecord(data.sources) ? data.sources : {};
     modernAgentSession = createAgentSession({
       offers: offerRecords(snapshot),
       paymentRecords: paymentRecords(snapshot),
       language: snapshot.language,
       storage: browserStorage(),
       agentEnabled: snapshot.agentEnabled,
+      dataAsOf: stringValue(sources.checkedAt) || null,
+      asinRankingContext: {
+        version: typeof data.asinRankingVersion === "number" ? data.asinRankingVersion : null,
+        startDate: stringValue(data.startDate) || null,
+        endDate: stringValue(data.endDate) || null
+      },
       loadPromotionReport: loadPromotionPerformanceReport
     });
   }

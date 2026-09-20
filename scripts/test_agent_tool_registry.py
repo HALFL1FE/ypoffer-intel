@@ -232,6 +232,42 @@ def test_tool_results_respect_per_tool_json_byte_limits():
     assert error["errorCode"] == "invalid_tool_result"
 
 
+def test_merchant_top_asins_arguments_and_result_contract():
+    import copy
+
+    args, error = validate_tool_arguments("merchant_analysis", {"merchant": "362448", "view": "top_asins"})
+    assert error is None and args["view"] == "top_asins"
+    assert validate_tool_arguments("merchant_analysis", {"merchant": "362448", "view": "invalid"})[1]
+    assert validate_tool_arguments("merchant_analysis", {"merchant": "362448", "view": "overview"})[1] is None
+    data = {
+        "merchant": {"id": "362448", "name": "Midland Radio"},
+        "topAsins": ["B09PFBWV55", "B000000001"],
+        "asinRanking": {"status": "available", "basis": "period_revenue_desc_then_asin", "limit": 5,
+                        "returned": 2, "version": 2, "startDate": "2026-09-01", "endDate": "2026-09-30", "dataAsOf": "2026-09-19T06:46:15Z"},
+    }
+    assert validate_tool_result("merchant_analysis", {"ok": True, "data": data})[1] is None
+    for patch in [
+        {"topAsins": ["B09PFBWV55"] * 2}, {"topAsins": ["bad", "B000000001"]},
+        {"topAsins": ["B00000000" + str(i) for i in range(6)]},
+        {"asinRanking": {**data["asinRanking"], "returned": 1}},
+        {"asinRanking": {**data["asinRanking"], "status": "empty"}},
+        {"asinRanking": {**data["asinRanking"], "extra": True}},
+        {"asinRanking": {**data["asinRanking"], "startDate": "2026-02-30"}},
+        {"asinRanking": {**data["asinRanking"], "version": True}},
+        {"rawData": "not allowed"},
+    ]:
+        invalid = copy.deepcopy(data)
+        invalid.update(patch)
+        assert validate_tool_result("merchant_analysis", {"ok": True, "data": invalid})[1], patch
+    for field in ["topAsins", "asinRanking"]:
+        invalid = copy.deepcopy(data)
+        del invalid[field]
+        assert validate_tool_result("merchant_analysis", {"ok": True, "data": invalid})[1]
+    for status in ["empty", "unavailable"]:
+        empty = {**data, "topAsins": [], "asinRanking": {**data["asinRanking"], "status": status, "returned": 0}}
+        assert validate_tool_result("merchant_analysis", {"ok": True, "data": empty})[1] is None
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:
