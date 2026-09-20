@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from "vue";
 
 import type {
   OfferRecord,
-  OfferChannel,
   OfferTrackerColumnVisibility,
   OfferTrackerDateRange,
   OfferTrackerExportPayload,
@@ -15,8 +14,7 @@ import type {
 import { translateMessage } from "../../shared/i18n";
 import OfferTrackerFilters from "./OfferTrackerFilters.vue";
 import OfferTrackerTable from "./OfferTrackerTable.vue";
-import OfferChannelEditor from "./OfferChannelEditor.vue";
-import { validateChannelSelections } from "./offerChannels";
+import OfferExportPreview from "./OfferExportPreview.vue";
 import { useOfferTracker, type OfferTrackerLoader } from "./useOfferTracker";
 
 const props = withDefaults(defineProps<{
@@ -79,9 +77,6 @@ const {
   filters,
   search,
   view,
-  activeTab,
-  channelSelections,
-  masterRows,
   loading,
   error,
   filteredRows,
@@ -100,7 +95,6 @@ type SavedTrackerView = {
   name: string;
   filters: TrackerFilterState;
   view: OfferTrackerView;
-  tab?: "offers" | OfferChannel;
 };
 
 const savedViewOpen = ref(false);
@@ -125,25 +119,25 @@ const errorMessage = computed(() => {
     : translateMessage(props.language, "offerTracker.loadError", "Failed to load filtered data. Please try again.");
 });
 
-const exportError = ref("");
-const editorRows = computed(() => masterRows.value.map(row => row.source));
+const exportPreview = ref<OfferTrackerExportPayload | null>(null);
 const visibleColumns = ref<OfferTrackerColumnVisibility>({});
 
 function emitDownload(selectedOnly: boolean): void {
   if (!props.download) return;
   const rows = tracker.exportRows(selectedOnly);
   if (!rows.length) return;
-  exportError.value = validateChannelSelections(rows, channelSelections.value) || "";
-  if (exportError.value) return;
-  props.download({
+  exportPreview.value = {
     rows: [...rows],
-    view: "offers",
+    view: view.value,
     selectedOnly,
     visibleColumns: { ...visibleColumns.value },
-    rules: { ...rules.value },
-    dateRange: { startDate: tracker.filters.value.startDate, endDate: tracker.filters.value.endDate },
-    channelSelections: JSON.parse(JSON.stringify(channelSelections.value))
-  });
+    rules: { ...rules.value }
+  };
+}
+
+function confirmDownload(payload: OfferTrackerExportPayload): void {
+  props.download?.(payload);
+  exportPreview.value = null;
 }
 
 function persistSavedViews(): void {
@@ -158,7 +152,7 @@ function saveCurrentView(): void {
   const name = savedViewName.value.trim() || `${copy.value.savedViews} ${savedViews.value.length + 1}`;
   savedViews.value = [
     ...savedViews.value.filter((item) => item.name !== name),
-    { name, filters: { ...tracker.filters.value }, view: "offers" as const, tab: activeTab.value }
+    { name, filters: { ...tracker.filters.value }, view: view.value }
   ].slice(-8);
   savedViewName.value = "";
   persistSavedViews();
@@ -175,7 +169,6 @@ function saveRules(nextRules: OfferTrackerRules): void {
 
 async function restoreSavedView(item: SavedTrackerView): Promise<void> {
   tracker.setView(item.view);
-  tracker.setTab(item.tab && ["google", "deals", "creators"].includes(item.tab) ? item.tab : "offers");
   tracker.setDraftFilters(item.filters);
   await tracker.applyFilters();
   savedViewOpen.value = false;
@@ -210,7 +203,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="oi-modern-page offer-tracker-modern-page" data-page="offer-list-tracker">
+  <main class="oi-modern-page offer-tracker-modern-page" data-page="offer-list-tracker" :inert="Boolean(exportPreview)">
     <header class="offer-tracker-modern-header offer-tracker-header">
       <div>
         <span class="offer-tracker-modern-eyebrow">{{ copy.eyebrow }}</span>
@@ -229,7 +222,7 @@ onMounted(() => {
           type="button"
           class="offer-tracker-primary-button offer-tracker-export-button"
           :aria-label="copy.exportCurrent"
-          :disabled="!masterRows.length"
+          :disabled="!filteredRows.length"
           @click="emitDownload(false)"
         >{{ copy.exportExcel }}</button>
       </div>
@@ -261,7 +254,6 @@ onMounted(() => {
     />
 
     <p v-if="errorMessage" class="offer-tracker-modern-notice error" role="alert">{{ errorMessage }}</p>
-    <p v-if="exportError" class="offer-tracker-modern-notice error" role="alert">{{ exportError }}</p>
 
     <section class="offer-tracker-modern-kpis offer-tracker-kpis" :aria-label="copy.summary">
       <article class="offer-tracker-kpi" style="--kpi-accent:#1769d2;--kpi-soft:#eaf2fc">
@@ -290,9 +282,7 @@ onMounted(() => {
       :page-size="pageSize"
       :selected-keys="selectedKeys"
       :summary="selectionSummary"
-      view="offers"
-      :active-tab="activeTab"
-      :channel-selections="channelSelections"
+      :view="view"
       :search="search"
       :rules="rules"
       :language="props.language"
@@ -301,13 +291,10 @@ onMounted(() => {
       @toggle-page="tracker.toggleCurrentPage"
       @toggle-all="tracker.toggleAllFiltered"
       @page-change="tracker.setPage"
-      @tab-change="tracker.setTab"
+      @view-change="tracker.setView"
       @rules-change="saveRules"
       @columns-change="visibleColumns = $event"
     >
-      <template #channel-editor>
-        <OfferChannelEditor v-if="activeTab !== 'offers'" :key="activeTab" :rows="editorRows" :channel="activeTab" :selections="channelSelections" :language="language" :rules="rules" @update="channelSelections = $event; exportError = ''" />
-      </template>
       <template #footer-actions>
         <button
           type="button"
@@ -319,4 +306,5 @@ onMounted(() => {
       </template>
     </OfferTrackerTable>
   </main>
+  <OfferExportPreview v-if="exportPreview" :payload="exportPreview" :language="language" @close="exportPreview = null" @confirm="confirmDownload" />
 </template>

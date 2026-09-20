@@ -94,19 +94,4 @@ export interface OfferTrackerExportPayload {
   readonly rules?: OfferTrackerRules;
   readonly backgroundPreset?: "tier" | "blue" | "none";
   readonly backgroundRanges?: readonly { start: number; end: number; color: string }[];
-  readonly dateRange?: OfferTrackerDateRange;
-  readonly channelSelections?: OfferChannelSelections;
 }
-
-export type OfferChannel = "google" | "deals" | "creators";
-export type OfferChannelGrade = OfferTrackerPriorityKey;
-export interface OfferChannelSelection {
-  included: boolean;
-  grade: OfferChannelGrade;
-  verification: "pending" | "confirmed";
-  asins: string[];
-  reason: string;
-  asinReason: string;
-  checks: string;
-}
-export type OfferChannelSelections = Partial<Record<string, Partial<Record<OfferChannel, OfferChannelSelection>>>>;
