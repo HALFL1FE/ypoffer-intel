@@ -758,7 +758,8 @@
 .offer-tracker-table-wrap,
 .offer-tracker-table-scroll {
   min-height: 348px;
-  max-height: calc(100vh - 520px);
+  /* Let the current page of offers expand instead of clipping it to the viewport. */
+  max-height: none;
   overflow: auto;
 }
 
