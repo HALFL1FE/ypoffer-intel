@@ -214,11 +214,9 @@ export function useCategoryReport(options: UseCategoryReportOptions = {}) {
     selection.value = {
       type: entry.type,
       ...(entry.category ? { category: entry.category } : {}),
-      ...(entry.merchantId ? { merchantId: entry.merchantId } : {}),
-      ...(entry.merchantName ? { merchantName: entry.merchantName } : {}),
       value: entry.value
     };
-    search.value = entry.type === "category" ? entry.category || "" : entry.merchantId || entry.merchantName || "";
+    search.value = entry.category || "";
     resetDrilldown();
     return true;
   }

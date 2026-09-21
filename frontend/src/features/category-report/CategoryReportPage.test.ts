@@ -145,7 +145,7 @@ describe("CategoryReportPage", () => {
     expect(wrapper.get(".category-name-chip").text()).toBe("家居、厨具、家装");
   });
 
-  it("disambiguates identical Chinese labels and preserves merchant-name searching", async () => {
+  it("disambiguates category labels and rejects merchant selection", async () => {
     const wrapper = mount(CategoryReportPage, {
       props: { language: "zh", autoLoad: false, reportData: { sheets: [{ name: "Tier 1", rows: [
         { "Merchant ID": "1", "Merchant Name": "Alpha", Category: "Baby", Revenue: 10 },
@@ -153,7 +153,7 @@ describe("CategoryReportPage", () => {
       ] }] } }
     });
     expect(wrapper.findAll("#category-report-options option").map(option => option.attributes("value")))
-      .toEqual(expect.arrayContaining(["婴儿用品（Baby）", "婴儿用品（Baby Products）", "Alpha · 1"]));
+      .toEqual(["婴儿用品（Baby）", "婴儿用品（Baby Products）"]);
     const search = wrapper.get("#category-report-search");
     await search.setValue("婴儿用品");
     await search.trigger("change");
@@ -165,7 +165,9 @@ describe("CategoryReportPage", () => {
     expect(wrapper.get(".category-detail-merchant-row").text()).toContain("Beta");
     await search.setValue("Alpha · 1");
     await search.trigger("change");
-    expect(wrapper.get(".dashboard-category-search-status").text()).toBe("当前商家：Alpha");
+    expect(wrapper.get(".dashboard-category-search-status").text()).toBe("请从建议中选择品类。");
+    expect(wrapper.get(".category-detail-merchant-row").text()).toContain("Beta");
+    expect(wrapper.get("#category-report-search").attributes("placeholder")).toBe("选择品类");
   });
   it("keeps the exit control available if an in-flight load returns no merchants", async () => {
     const pending: Array<(value: unknown) => void> = [];
