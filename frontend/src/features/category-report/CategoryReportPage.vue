@@ -108,13 +108,13 @@ function displayCategory(value: string): string {
 const searchOptions = computed(() => {
   const entries = category.searchEntries.value;
   const counts = new Map<string, number>();
-  entries.filter(entry => entry.type === "category").forEach(entry => {
+  entries.forEach(entry => {
     const label = displayCategory(entry.value);
     counts.set(label, (counts.get(label) ?? 0) + 1);
   });
   return entries.map(entry => {
-    const label = entry.type === "category" ? displayCategory(entry.value) : entry.value;
-    return { ...entry, displayValue: entry.type === "category" && (counts.get(label) ?? 0) > 1
+    const label = displayCategory(entry.value);
+    return { ...entry, displayValue: (counts.get(label) ?? 0) > 1
       ? `${label}（${entry.value}）` : label };
   });
 });
@@ -132,11 +132,11 @@ const copy = computed(() => ({
   reportHelp: message("categoryReport.reportHelp", "Revenue, orders, clicks, and merchant mix for the selected tiers"),
   allTiers: message("categoryReport.allTiers", "All Tier 1-4"),
   blackTier: message("categoryReport.blackTier", "Black Tier"),
-  categoryMerchant: message("categoryReport.categoryMerchant", "Category / merchant"),
-  searchPlaceholder: message("categoryReport.searchPlaceholder", "Select category or merchant"),
+  categoryLabel: message("categoryReport.categoryLabel", "Category"),
+  searchPlaceholder: message("categoryReport.searchPlaceholder", "Select category"),
   searchHint: message("categoryReport.searchHint", "Choose a suggestion or press Enter to update the report."),
   searchAll: message("categoryReport.searchAll", "Clear the field and press Enter to show all categories."),
-  searchInvalid: message("categoryReport.searchInvalid", "Select a category or merchant from the suggestions."),
+  searchInvalid: message("categoryReport.searchInvalid", "Select a category from the suggestions."),
   dateRange: message("categoryReport.dateRange", "Date / range"),
   apply: message("categoryReport.apply", "Apply"),
   loading: message("categoryReport.loading", "Loading selected tiers from YeahPromos DB…"),
@@ -182,7 +182,6 @@ const searchStatus = computed(() => {
   if (searchError.value) return copy.value.searchInvalid;
   if (!category.searchDraft.value) return copy.value.searchAll;
   if (category.selection.value?.type === "category") return message("categoryReport.showingCategory", "Showing category: {category}", { category: displayCategory(category.selection.value.category || "") });
-  if (category.selection.value?.type === "merchant") return message("categoryReport.showingMerchant", "Showing merchant: {merchant}", { merchant: category.selection.value.merchantName || "" });
   return copy.value.searchHint;
 });
 const summaryCards = computed(() => [
@@ -369,7 +368,7 @@ onUnmounted(() => {
 
       <div class="dashboard-category-controls" aria-label="Category report controls">
         <label class="dashboard-category-search-field">
-          <span>{{ copy.categoryMerchant }}</span>
+          <span>{{ copy.categoryLabel }}</span>
           <input
             id="category-report-search"
             data-category-action="search"
@@ -387,7 +386,7 @@ onUnmounted(() => {
               v-for="entry in searchOptions"
               :key="entry.type + ':' + entry.value"
               :value="entry.displayValue"
-              :label="entry.type === 'category' ? entry.value : message('categoryReport.merchantOption', 'Merchant')"
+              :label="entry.value"
             />
           </datalist>
           <small class="dashboard-category-search-status" :class="{ error: searchError }">
