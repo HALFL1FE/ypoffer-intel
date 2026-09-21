@@ -126,15 +126,15 @@ describe("categoryReportModel", () => {
     });
   });
 
-  it("filters and sorts exact category or merchant selections", () => {
+  it("filters and sorts categories without matching merchant names or IDs", () => {
     const groups = aggregateCategoryGroups(buildCategoryRows(report, ["Tier 1", "Tier 2"]));
     expect(sortCategoryGroups(groups, "revenue", "desc")[0]?.category).toBe("Beauty");
     expect(sortCategoryGroups(groups, "category", "asc").map((group) => group.category))
       .toEqual(["Beauty", "Main Only", "Sheet Priority"]);
     expect(filterCategoryGroups(groups, { type: "category", category: "Main Only" })[0]?.category)
       .toBe("Main Only");
-    expect(filterCategoryGroups(groups, { type: "merchant", merchantId: "101", merchantName: "Alpha" })[0]?.category)
-      .toBe("Sheet Priority");
+    expect(filterCategoryGroups(groups, null, "Alpha")).toEqual([]);
+    expect(filterCategoryGroups(groups, null, "101")).toEqual([]);
   });
 
   it("creates a drillable top-seven pie and aggregates overflow as Other", () => {

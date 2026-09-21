@@ -25,7 +25,10 @@ describe("useCategoryReport", () => {
     expect(category.selectedTiers.value).toEqual(["Tier 1", "Tier 2", "Tier 3", "Tier 4"]);
     expect(category.groups.value.map((group) => group.category)).toEqual(["Home", "Beauty"]);
     expect(category.summary.value).toMatchObject({ merchantCount: 3, revenue: 3500, orders: 35, clicks: 350 });
-    expect(category.searchEntries.value.some((entry) => entry.type === "merchant" && entry.value === "Gamma · 201")).toBe(true);
+    expect(category.searchEntries.value.map(entry => entry.value)).toEqual(["Beauty", "Home"]);
+    for (const query of ["Gamma", "201", "Gamma · 201"]) expect(category.applySearch(query)).toBe(false);
+    expect(category.selection.value).toBeNull();
+    expect(category.summary.value.merchantCount).toBe(3);
   });
 
   it("links search selection, pie focus, expansion, and sort state", () => {

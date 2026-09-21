@@ -29,10 +29,8 @@ export interface CategoryReportData {
 }
 
 export interface CategoryReportSelection {
-  readonly type: "category" | "merchant";
+  readonly type: "category";
   readonly category?: string;
-  readonly merchantId?: string;
-  readonly merchantName?: string;
   readonly value?: string;
 }
 
@@ -73,11 +71,9 @@ export interface CategoryReportGroup {
 }
 
 export interface CategorySearchEntry {
-  readonly type: "category" | "merchant";
+  readonly type: "category";
   readonly value: string;
   readonly category?: string;
-  readonly merchantId?: string;
-  readonly merchantName?: string;
 }
 
 export interface CategoryPieSlice {
@@ -417,42 +413,22 @@ export function filterCategoryGroups(
     const key = categoryKey(selection.category);
     return groups.filter((group) => categoryKey(group.category) === key);
   }
-  if (selection?.type === "merchant") {
-    const id = text(selection.merchantId);
-    const name = normalizedCategory(selection.merchantName);
-    return groups.filter((group) => group.rows.some((row) =>
-      (id && row.merchantId === id) || (name && normalizedCategory(row.merchantName) === name)
-    ));
-  }
   const query = normalizedCategory(search);
   if (!query) return groups.slice();
-  return groups.filter((group) => group.category.toLowerCase().includes(query)
-    || group.rows.some((row) => (row.merchantName + " " + row.merchantId).toLowerCase().includes(query)));
+  return groups.filter((group) => group.category.toLowerCase().includes(query));
 }
 
 export function categorySearchEntries(rows: readonly CategoryReportRow[]): CategorySearchEntry[] {
   const categories = new Map<string, CategorySearchEntry>();
-  const merchants = new Map<string, CategorySearchEntry>();
   rows.forEach((row) => {
     const category = row.category;
     const categoryId = normalizedCategory(category);
     if (category && !categories.has(categoryId)) {
       categories.set(categoryId, { type: "category", value: category, category });
     }
-    if (!row.merchantId && !row.merchantName) return;
-    const key = row.merchantId ? "id:" + row.merchantId : "name:" + normalizedCategory(row.merchantName);
-    if (!merchants.has(key)) {
-      const label = row.merchantName || row.merchantId;
-      merchants.set(key, {
-        type: "merchant",
-        value: row.merchantId ? label + " · " + row.merchantId : label + " · merchant",
-        merchantId: row.merchantId,
-        merchantName: label
-      });
-    }
   });
   const byValue = (left: CategorySearchEntry, right: CategorySearchEntry) => categoryCompare(left.value, right.value);
-  return [...Array.from(categories.values()).sort(byValue), ...Array.from(merchants.values()).sort(byValue)];
+  return Array.from(categories.values()).sort(byValue);
 }
 
 function otherGroup(slices: readonly { group: CategoryReportGroup; value: number }[]): CategoryReportGroup {
