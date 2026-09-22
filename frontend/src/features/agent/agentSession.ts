@@ -1166,7 +1166,12 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       const status = topAsins.length ? "available" : Array.isArray(raw) && raw.length === 0 ? "empty" : "unavailable";
       const context = options.asinRankingContext;
       const version = typeof context?.version === "number" && Number.isInteger(context.version) && context.version > 0 ? context.version : null;
-      const basis = version === 1 || version === 2 ? "period_revenue_desc_then_asin" : "unknown";
+      const basis = version === 1 || version === 2 || version === 3 ? "period_revenue_desc_then_asin" : "unknown";
+      const revenueRows = Array.isArray(row.topAsinMetrics) ? row.topAsinMetrics.filter(isRecord) : [];
+      const topAsinMetrics = topAsins.map(asin => {
+        const value = revenueRows.find(metric => metric.asin === asin)?.periodRevenue;
+        return { asin, periodRevenue: typeof value === "number" && Number.isFinite(value) ? value : null };
+      });
       const date = (value: unknown): string | null => {
         if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
         const parsed = new Date(value);
@@ -1189,7 +1194,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
         en ? "Current snapshot only, up to 5 per merchant; other periods and larger lists are not queried."
           : "仅提取当前快照，每家最多 5 个；未查询其他期间或更多商品。"
       ].filter(Boolean).join(" ");
-      return success({ merchant: merchantObject(row), topAsins,
+      return success({ merchant: merchantObject(row), topAsins, topAsinMetrics,
         asinRanking: { status, basis, limit: 5, returned: topAsins.length, startDate, endDate, dataAsOf, version },
         headline: `${merchantName(row)} · Top ASIN`, note
       }, "cache", dataAsOf);
@@ -1538,8 +1543,12 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       return normalizeAgentResultView({
         id: item.call.id, toolName: item.call.name, kind: data.topAsins.length ? "table" : "summary", status: "done",
         title: text(data.headline, 180), source: result.source.dataSource, dataAsOf: result.source.dataAsOf,
-        columns: currentLanguage === "en" ? ["Merchant ID", "Merchant", "ASIN"] : ["商家 ID", "商家", "ASIN"],
-        rows: data.topAsins.map((asin, index) => ({ label: String(index + 1), values: [text(merchant.id), text(merchant.name), text(asin)] })),
+        columns: currentLanguage === "en" ? ["Merchant ID", "Merchant", "ASIN", "Period revenue"] : ["商家 ID", "商家", "ASIN", "期间收入"],
+        rows: data.topAsins.map((asin, index) => {
+          const revenue = Array.isArray(data.topAsinMetrics) ? data.topAsinMetrics.filter(isRecord).find(row => row.asin === asin)?.periodRevenue : null;
+          return { label: String(index + 1), values: [text(merchant.id), text(merchant.name), text(asin),
+            typeof revenue === "number" ? formatAgentResultNumber("revenue", revenue) : (currentLanguage === "en" ? "Not provided" : "未提供")] };
+        }),
         metrics: [], message: text(data.note, 800), estimated: false, partial: false
       });
     }
@@ -1663,6 +1672,19 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
         lines.push((language === "en" ? "Data unavailable for " : "\u6570\u636e\u4e0d\u53ef\u7528\uff1a") + toolTarget(item.call) + ".");
         return;
       }
+      if (item.call.name === "asin_analysis" && Array.isArray(data.rows)) {
+        const rows = data.rows.filter(isRecord);
+        const asins = [...new Set(rows.map(row => text(row.asin, 20)).filter(Boolean))];
+        if (asins.length > 1) {
+          for (const asin of asins) {
+            lines.push(fallbackAnswer([{ ...item, result: { ...item.result, data: { ...data,
+              headline: asin, rows: rows.filter(row => row.asin === asin),
+              monthly: Array.isArray(data.monthly) ? data.monthly.filter(isRecord).filter(row => row.asin === asin) : []
+            } } }], language, []));
+          }
+          return;
+        }
+      }
       const headline = text(data.headline, 240);
       if (headline) lines.push(headline);
       if (item.call.name === "asin_analysis" && Array.isArray(data.rows)) {
@@ -1701,9 +1723,13 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       } else if (item.call.name === "merchant_analysis" && Array.isArray(data.topAsins) && isRecord(data.merchant)) {
         const cell = (value: unknown) => text(value, 200).replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ");
         lines.push(language === "en"
-          ? "| Merchant ID | Merchant | Top ASIN |\n| --- | --- | --- |"
-          : "| 商家 ID | 商家 | Top ASIN |\n| --- | --- | --- |");
-        lines.push(`| ${cell(data.merchant.id)} | ${cell(data.merchant.name)} | ${data.topAsins.length ? data.topAsins.join(", ") : (language === "en" ? "Not provided" : "未提供")} |`);
+          ? "| Merchant ID | Merchant | Top ASIN | Period revenue |\n| --- | --- | --- | ---: |"
+          : "| 商家 ID | 商家 | Top ASIN | 期间收入 |\n| --- | --- | --- | ---: |");
+        const merchant = data.merchant;
+        for (const asin of data.topAsins) {
+          const revenue = Array.isArray(data.topAsinMetrics) ? data.topAsinMetrics.filter(isRecord).find(row => row.asin === asin)?.periodRevenue : null;
+          lines.push(`| ${cell(merchant.id)} | ${cell(merchant.name)} | ${cell(asin)} | ${typeof revenue === "number" ? formatAgentResultNumber("revenue", revenue) : (language === "en" ? "Not provided" : "未提供")} |`);
+        }
         lines.push(text(data.note, 800));
       } else if (item.call.name === "merchant_analysis" && isRecord(data.metrics)) {
         const metrics = data.metrics;

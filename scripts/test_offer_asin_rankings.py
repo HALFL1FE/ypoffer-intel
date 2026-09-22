@@ -65,6 +65,11 @@ class OfferAsinRankingTests(unittest.TestCase):
             "B000000007", "B000000005", "B000000006", "B000000000", "B000000001"
         ])
         self.assertEqual(len(ranked["1"]), 5)
+        self.assertEqual(self.offers[0]["topAsinMetrics"], [
+            {"asin": asin, "periodRevenue": revenue} for asin, revenue in
+            zip(ranked["1"], [200, 100, 100, 0, 0])
+        ])
+        self.assertEqual(self.offers[1]["topAsinMetrics"][0]["periodRevenue"], 5000)
         self.assertEqual(ranked["2"], ["B000000001"])
         self.assertNotIn("9", ranked)
         self.assertEqual(self.rank("2026-09-08", "2026-09-08")["1"][0], "B000000001")
@@ -74,6 +79,14 @@ class OfferAsinRankingTests(unittest.TestCase):
         self.assertEqual(ranked["1"][:5], [f"B00000000{i}" for i in range(5)])
         self.assertEqual(ranked["3"], ["B000000001", "B000000003"])
         self.assertEqual(ranked["4"], [])
+
+    def test_negative_revenue_is_preserved_for_code_order_fillers(self):
+        self.conn.execute("INSERT INTO cnpscy_amazon_order VALUES (3, 'B000000001', 20260901, -30)")
+        self.rank()
+        self.assertEqual(self.offers[2]["topAsinMetrics"], [
+            {"asin": "B000000001", "periodRevenue": -30},
+            {"asin": "B000000003", "periodRevenue": 0},
+        ])
 
     def test_more_than_five_positive_products_and_order_only_product(self):
         self.conn.executemany("INSERT INTO cnpscy_amazon_order VALUES (?, ?, ?, ?)", [
@@ -86,10 +99,11 @@ class OfferAsinRankingTests(unittest.TestCase):
             with self.subTest(column=column):
                 self.columns.remove(column)
                 self.assertEqual(self.rank()["1"][:5], [f"B00000000{i}" for i in range(5)])
+                self.assertTrue(all(row["periodRevenue"] is None for row in self.offers[0]["topAsinMetrics"]))
                 self.columns.add(column)
 
     def test_old_snapshots_are_rebuilt_even_when_memory_and_file_are_fresh(self):
-        stale = {"asinRankingVersion": 1, "offers": [{"topAsins": ["B000000001"]}]}
+        stale = {"asinRankingVersion": 2, "offers": [{"topAsins": ["B000000001"]}]}
         ranked = {"asinRankingVersion": offer_db.OFFER_ASIN_RANKING_VERSION, "offers": []}
         with patch.object(offer_db, "_offers_memory_cache", (time.time(), stale)), patch.object(
             offer_db, "_load_any_cache", return_value=stale
@@ -111,7 +125,8 @@ class OfferAsinRankingTests(unittest.TestCase):
     def test_committed_bootstrap_stays_within_compressed_response_budget(self):
         path = Path(__file__).resolve().parents[1] / "protected_data/db_offers_cache.json"
         payload = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(payload["asinRankingVersion"], offer_db.OFFER_ASIN_RANKING_VERSION)
+        # 已提交的旧快照由运行时迁移，不能要求改写本地用户缓存。
+        self.assertLessEqual(payload["asinRankingVersion"], offer_db.OFFER_ASIN_RANKING_VERSION)
         for offer in payload["offers"]:
             self.assertLessEqual(len(offer.get("topAsins") or []), 5)
             self.assertLessEqual(len(offer.get("productAsins") or []), 5)

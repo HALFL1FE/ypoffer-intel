@@ -3292,7 +3292,7 @@ OFFERS_CACHE_FILE = CACHE_DIR / "db_offers_cache.json"
 KEYWORDS_CACHE_FILE = CACHE_DIR / "db_keywords_cache.json"
 PUBLISHERS_CACHE_FILE = CACHE_DIR / "db_publishers_cache.json"
 CACHE_TTL_SECONDS = int(os.environ.get("OFFER_DB_CACHE_TTL", "86400"))  # 24 hours
-OFFER_ASIN_RANKING_VERSION = 2
+OFFER_ASIN_RANKING_VERSION = 3
 MERCHANT_CACHE_TTL = int(os.environ.get("OFFER_DB_MERCHANT_CACHE_TTL", "3600"))  # 1 hour
 SEARCH_CACHE_TTL = int(os.environ.get("OFFER_DB_SEARCH_CACHE_TTL", "3600"))  # 1 hour
 ASIN_CACHE_TTL = int(os.environ.get("OFFER_DB_ASIN_CACHE_TTL", "300"))  # 5 minutes
@@ -3466,7 +3466,7 @@ def chatbot_offers_payload() -> dict[str, Any]:
 
     # Fast path: serve from the pre-warmed 24h memory cache immediately,
     # then rebuild in the background so chatbot data stays fresh.
-    if _offers_memory_cache is not None:
+    if _offers_memory_cache is not None and _offers_memory_cache[1].get("asinRankingVersion") == OFFER_ASIN_RANKING_VERSION:
         ts, mem_payload = _offers_memory_cache
         result = {
             "offers": mem_payload.get("offers", []),
@@ -3622,10 +3622,19 @@ def offer_asin_rankings(
             if asin:
                 revenues[mid][asin] = to_float(row.get("revenue"))
 
-    return {
+    ranked = {
         mid: sorted(asins, key=lambda asin: (-max(0, revenues[mid].get(asin, 0)), asin))[:5]
         for mid, asins in candidates.items()
     }
+    # 保留排序时的同一份收入，不用其他月份或商家汇总代替单品收入。
+    revenue_available = bool(asin_col and merchant_col and revenue_col and date_col)
+    for offer in offers:
+        mid = str(offer["merchantId"])
+        offer["topAsinMetrics"] = [
+            {"asin": asin, "periodRevenue": revenues[mid].get(asin, 0) if revenue_available else None}
+            for asin in ranked[mid]
+        ]
+    return ranked
 
 
 def _build_offers_payload(

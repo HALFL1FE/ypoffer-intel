@@ -64,7 +64,7 @@ AGENT_RESULT_FIELDS = {
         "merchant", "tier", "category", "metrics", "ranks", "comparisons",
         "strengths", "weaknesses", "paymentRisk", "peers", "latestMonth",
         "monthly", "monthlyDataAvailable", "monthlyDataSource", "monthlyNote",
-        "headline", "note", "topAsins", "asinRanking",
+        "headline", "note", "topAsins", "asinRanking", "topAsinMetrics",
     ),
     "category_analysis": (
         "category", "merchantCount", "tierDistribution", "aggregates",
@@ -568,7 +568,7 @@ def _valid_top_asins(data: dict) -> bool:
     version = ranking["version"]
     if version is not None and (type(version) is not int or version < 1):
         return False
-    basis = "period_revenue_desc_then_asin" if version in (1, 2) else "unknown"
+    basis = "period_revenue_desc_then_asin" if version in (1, 2, 3) else "unknown"
     if ranking["basis"] != basis:
         return False
     for field in ("startDate", "endDate"):
@@ -586,6 +586,16 @@ def _valid_top_asins(data: dict) -> bool:
     if as_of is not None and (not isinstance(as_of, str) or not as_of or len(as_of) > 100):
         return False
     merchant = data.get("merchant")
+    metrics = data.get("topAsinMetrics")
+    if metrics is not None:
+        if not isinstance(metrics, list) or len(metrics) != len(asins):
+            return False
+        for asin, row in zip(asins, metrics):
+            if not isinstance(row, dict) or set(row) != {"asin", "periodRevenue"} or row["asin"] != asin:
+                return False
+            revenue = row["periodRevenue"]
+            if revenue is not None and (type(revenue) not in (int, float) or not math.isfinite(revenue)):
+                return False
     return (isinstance(merchant, dict) and set(merchant) == {"id", "name"}
             and isinstance(merchant["id"], str) and bool(re.fullmatch(r"\d+", merchant["id"]))
             and isinstance(merchant["name"], str) and bool(merchant["name"]))

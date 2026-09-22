@@ -1,19 +1,30 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { UiLanguage } from "../../../shared/i18n";
 import type { AgentResultView } from "../../../shared/contracts/agentResult";
 
-defineProps<{
+const props = defineProps<{
   readonly language: UiLanguage;
   readonly view: AgentResultView;
 }>();
+// 保留结果模型和追问上下文，只在展示时按 ASIN 拆表。
+const tables = computed(() => {
+  if (props.view.toolName !== "asin_analysis") return [{ title: props.view.title, rows: props.view.rows }];
+  const groups = new Map<string, typeof props.view.rows>();
+  for (const row of props.view.rows) {
+    const asin = row.label.match(/^B[0-9A-Z]{9}(?=\s|$)/)?.[0] || props.view.title;
+    groups.set(asin, [...(groups.get(asin) || []), row]);
+  }
+  return groups.size ? [...groups].map(([title, rows]) => ({ title, rows })) : [{ title: props.view.title, rows: props.view.rows }];
+});
 </script>
 
 <template>
-  <section class="agent-modern-result-card" :aria-label="language === 'zh' ? '工具结果表' : 'Tool table'">
+  <section v-for="table in tables" :key="table.title" class="agent-modern-result-card" :aria-label="table.title">
     <header class="agent-modern-result-header">
       <div>
         <span class="agent-modern-eyebrow">{{ view.toolName }}</span>
-        <strong>{{ view.title }}</strong>
+        <strong>{{ table.title }}</strong>
       </div>
       <span class="agent-modern-result-status">{{ view.status }}</span>
     </header>
@@ -26,7 +37,7 @@ defineProps<{
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in view.rows" :key="`${view.id}-${row.label}`">
+          <tr v-for="(row, rowIndex) in table.rows" :key="`${view.id}-${rowIndex}`">
             <th scope="row">{{ row.label }}</th>
             <td v-for="(value, index) in row.values" :key="`${view.id}-${row.label}-${index}`">{{ value }}</td>
           </tr>
@@ -40,3 +51,7 @@ defineProps<{
     </footer>
   </section>
 </template>
+
+<style scoped>
+.agent-modern-result-card + .agent-modern-result-card { margin-top: 16px; }
+</style>
