@@ -246,6 +246,14 @@ def test_merchant_top_asins_arguments_and_result_contract():
                         "returned": 2, "version": 2, "startDate": "2026-09-01", "endDate": "2026-09-30", "dataAsOf": "2026-09-19T06:46:15Z"},
     }
     assert validate_tool_result("merchant_analysis", {"ok": True, "data": data})[1] is None
+    with_revenue = {**data, "topAsinMetrics": [
+        {"asin": "B09PFBWV55", "periodRevenue": 1234.56}, {"asin": "B000000001", "periodRevenue": 0}
+    ], "asinRanking": {**data["asinRanking"], "version": 3}}
+    assert validate_tool_result("merchant_analysis", {"ok": True, "data": with_revenue})[1] is None
+    for revenue in (True, "123", float("nan")):
+        invalid = copy.deepcopy(with_revenue)
+        invalid["topAsinMetrics"][0]["periodRevenue"] = revenue
+        assert validate_tool_result("merchant_analysis", {"ok": True, "data": invalid})[1]
     for patch in [
         {"topAsins": ["B09PFBWV55"] * 2}, {"topAsins": ["bad", "B000000001"]},
         {"topAsins": ["B00000000" + str(i) for i in range(6)]},

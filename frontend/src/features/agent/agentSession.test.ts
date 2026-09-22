@@ -197,10 +197,11 @@ describe("createAgentSession", () => {
   it("按商家提取快照内的 Top ASIN，保留排名、来源且不请求月度数据", async () => {
     const fetcher = vi.fn();
     const session = createAgentSession({
-      offers: [{ merchantId: "362448", merchantName: "Midland Radio", topAsins: ["b09pfbwv55", "B000000001", "B09PFBWV55", "bad"] }],
+      offers: [{ merchantId: "362448", merchantName: "Midland Radio", topAsins: ["b09pfbwv55", "B000000001", "B09PFBWV55", "bad"],
+        topAsinMetrics: [{ asin: "B09PFBWV55", periodRevenue: 1234.56 }, { asin: "B000000001", periodRevenue: 0 }] }],
       language: "zh", fetcher, enableQuestionLogging: false, enableTrace: false,
       dataAsOf: "2026-09-19T06:46:15Z",
-      asinRankingContext: { version: 2, startDate: "2026-09-01", endDate: "2026-09-30" }
+      asinRankingContext: { version: 3, startDate: "2026-09-01", endDate: "2026-09-30" }
     });
     const result = await session.executeTool({
       callId: "top-1", toolName: "merchant_analysis", arguments: { merchant: "362448 Midland Radio", view: "top_asins" },
@@ -209,14 +210,17 @@ describe("createAgentSession", () => {
     expect(result.toolResult).toMatchObject({ result: {
       ok: true, source: { dataSource: "cache", dataAsOf: "2026-09-19T06:46:15Z" },
       data: { merchant: { id: "362448", name: "Midland Radio" }, topAsins: ["B09PFBWV55", "B000000001"],
-        asinRanking: { status: "available", returned: 2, limit: 5, version: 2, basis: "period_revenue_desc_then_asin", startDate: "2026-09-01", endDate: "2026-09-30" } }
+        asinRanking: { status: "available", returned: 2, limit: 5, version: 3, basis: "period_revenue_desc_then_asin", startDate: "2026-09-01", endDate: "2026-09-30" } }
     } });
     expect(result.resultView).toMatchObject({ kind: "table", source: "cache", rows: [
-      { label: "1", values: ["362448", "Midland Radio", "B09PFBWV55"] },
-      { label: "2", values: ["362448", "Midland Radio", "B000000001"] }
+      { label: "1", values: ["362448", "Midland Radio", "B09PFBWV55", "1,234.56"] },
+      { label: "2", values: ["362448", "Midland Radio", "B000000001", "0"] }
     ] });
     expect(JSON.stringify(result.memoryEvent)).not.toContain("B09PFBWV55");
     expect(fetcher).not.toHaveBeenCalled();
+    expect(result.toolResult).toMatchObject({ result: { data: { topAsinMetrics: [
+      { asin: "B09PFBWV55", periodRevenue: 1234.56 }, { asin: "B000000001", periodRevenue: 0 }
+    ] } } });
   });
 
   it.each([

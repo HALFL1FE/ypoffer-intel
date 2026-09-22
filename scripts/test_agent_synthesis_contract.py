@@ -244,6 +244,7 @@ def test_top_asins_survive_synthesis_and_view_tampering_is_rejected():
         item["arguments"] = args.copy()
         item["result"]["data"] = {
             "merchant": {"id": "362448", "name": "Midland Radio"}, "topAsins": ["B09PFBWV55"],
+            "topAsinMetrics": [{"asin": "B09PFBWV55", "periodRevenue": 1234.56}],
             "asinRanking": {"status": "available", "basis": "unknown", "limit": 5, "returned": 1,
                             "version": None, "startDate": None, "endDate": None, "dataAsOf": None},
         }
@@ -252,6 +253,8 @@ def test_top_asins_survive_synthesis_and_view_tampering_is_rejected():
         for request in captured:
             assert "B09PFBWV55" in request["messages"][-1]["content"]
             assert "asinRanking" in request["system_prompt"]
+            assert "1234.56" in request["messages"][-1]["content"]
+            assert "topAsinMetrics.periodRevenue" in request["system_prompt"]
         item["arguments"]["view"] = "overview"
         targets, _ = invoke_stream_handlers(body)
         for target in targets:
