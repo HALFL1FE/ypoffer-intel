@@ -4,9 +4,9 @@ import { AGENT_COMMANDS, AGENT_MENU_COMMANDS, parseAgentCommand } from "./agentC
 
 describe("Agent query commands", () => {
   it("只展示高频命令，同时保留历史别名的解析兼容性", () => {
-    expect(AGENT_COMMANDS).toHaveLength(16);
+    expect(AGENT_COMMANDS).toHaveLength(17);
     expect(AGENT_MENU_COMMANDS.map((command) => command.key)).toEqual([
-      "merchant", "asin", "publisher", "publisherprofile", "trend", "tier",
+      "merchant", "asin", "keyword", "publisher", "publisherprofile", "trend", "tier",
       "category", "compare", "comparecategories", "payment", "promotion"
     ]);
     expect(parseAgentCommand("/revenue Tapo")?.command.key).toBe("revenue");
@@ -15,5 +15,6 @@ describe("Agent query commands", () => {
       command: { key: "promotion" },
       value: "Tapo"
     });
+    expect(parseAgentCommand("/keyword vacuum cleaner")).toMatchObject({ command: { key: "keyword" }, value: "vacuum cleaner" });
   });
 });

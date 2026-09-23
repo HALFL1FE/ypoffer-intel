@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentSession, type AgentSessionRequest } from "./agentSession";
 import type { AgentPromotionAttachment } from "./agentAttachment";
 import { emptyMetrics } from "../offer-performance/performanceModel";
+import { resolveReportQuery } from "../chatbot/report/reportQuery";
+import { buildEntityReport } from "../chatbot/report/entityReports";
 
 const offers = [
   {
@@ -48,6 +50,210 @@ function streamResponse(content: string): Response {
 }
 
 describe("createAgentSession", () => {
+  it("按 Report Mode 的关键词匹配返回晚到目录中的商户和命中依据", async () => {
+    const keywordOffers = [
+      { merchantId: "1001", merchantName: "Vac One", tier: "Tier 1", salesAmount: 500, orders: 5 },
+      { merchantId: "1002", merchantName: "Vac Two", tier: "Tier 2", salesAmount: 2000, orders: 12 },
+      { merchantId: "1003", merchantName: "Vac Hidden", tier: "Tier 4", salesAmount: 3000 }
+    ];
+    const catalog = { ok: true, checkedAt: "2026-09-22T00:00:00Z", merchants: [
+      { merchantId: "1001", merchantName: "Vac One", productTitles: ["Portable vacuum cleaner"] },
+      { merchantId: "1002", merchantName: "Vac Two", productKeywords: ["vacuum cleaner"] },
+      { merchantId: "1003", merchantName: "Vac Hidden", productTitles: ["Vacuum cleaner"] }
+    ] };
+    let currentCatalog: unknown = {};
+    const loadKeywords = vi.fn(async () => catalog);
+    const session = createAgentSession({
+      offers: keywordOffers, language: "en", enableQuestionLogging: false, enableTrace: false,
+      getProductKeywords: () => currentCatalog,
+      loadKeywords,
+      loadOffers: async () => ({ offers: keywordOffers })
+    });
+    currentCatalog = catalog;
+    const result = await session.executeTool({
+      callId: "keyword-late", toolName: "keyword_search", arguments: { keyword: "vacuum cleaner" },
+      prompt: "find vacuum cleaner merchants", signal: new AbortController().signal
+    });
+    const data = (result.toolResult.result as { data: { rows: Array<Record<string, unknown>> } }).data;
+    const report = buildEntityReport(resolveReportQuery("/keyword vacuum cleaner", { language: "en", categories: [] }), keywordOffers, catalog, "en");
+    expect(data.rows.map((row) => row.merchantId)).toEqual(report.rows.map((row) => row.merchantId));
+    expect(data.rows[0]).toMatchObject({ merchantId: "1001", matchedField: "productTitles" });
+    expect(result.resultView).toMatchObject({ toolName: "keyword_search", kind: "table", status: "done" });
+    expect(loadKeywords).not.toHaveBeenCalled();
+  });
+
+  it("关键词目录时间与商户快照时间分别呈现，不把目录刷新时间冒充商户指标时间", async () => {
+    const catalog = { ok: true, checkedAt: "2026-09-22T00:00:00Z", merchants: [
+      { merchantId: "1001", merchantName: "Vac One", productTitles: ["Vacuum cleaner"] }
+    ] };
+    const session = createAgentSession({
+      offers: [{ merchantId: "1001", merchantName: "Vac One", tier: "Tier 1", salesAmount: 500 }],
+      language: "en", getProductKeywords: () => catalog, enableQuestionLogging: false, enableTrace: false
+    });
+    const result = await session.executeTool({ callId: "keyword-time", toolName: "keyword_search", arguments: { keyword: "vacuum cleaner" }, prompt: "find vacuum cleaner brands", signal: new AbortController().signal });
+    expect(result.toolResult.result).toMatchObject({ ok: true, source: { dataAsOf: null }, data: { keywordCheckedAt: catalog.checkedAt } });
+    expect(result.resultView?.message).toContain(catalog.checkedAt);
+  });
+
+  it("继承 Report Mode 的 audio 歧义提示，而不是误报无匹配", async () => {
+    const session = createAgentSession({ offers: [], language: "en", loadKeywords: async () => ({ ok: true, merchants: [] }), enableQuestionLogging: false, enableTrace: false });
+    const result = await session.executeTool({ callId: "keyword-audio", toolName: "keyword_search", arguments: { keyword: "audio" }, prompt: "audio brands", signal: new AbortController().signal });
+    expect(result.toolResult.result).toMatchObject({ ok: true, data: { matchedCount: 0 } });
+    expect(result.resultView?.message).toContain("headphones/earbuds/audio");
+  });
+
+  it("完整关键词目录无命中时显示无匹配，而非数据不可用", async () => {
+    const session = createAgentSession({
+      offers: [{ merchantId: "1001", merchantName: "Vac One", tier: "Tier 1" }],
+      loadKeywords: async () => ({ ok: true, merchants: [] }),
+      language: "en", enableQuestionLogging: false, enableTrace: false
+    });
+    const result = await session.executeTool({ callId: "keyword-not-found", toolName: "keyword_search", arguments: { keyword: "vacuum cleaner" }, prompt: "find vacuum cleaner brands", signal: new AbortController().signal });
+    expect(result.toolResult.result).toMatchObject({ ok: false, errorCode: "not_found" });
+    expect(result.resultView?.message).toContain("No merchants matched");
+  });
+
+  it("仅在关键词命中商户中按现有快照口径推荐，目录独有商户不参与排名", async () => {
+    const keywordOffers = [
+      { merchantId: "1001", merchantName: "First", tier: "Tier 1", salesAmount: 500, orders: 5 },
+      { merchantId: "1002", merchantName: "Second", tier: "Tier 2", salesAmount: 2000, orders: 12 }
+    ];
+    const catalog = { ok: true, checkedAt: "2026-09-22", merchants: [
+      { merchantId: "1001", merchantName: "First", productTitles: ["Vacuum cleaner"] },
+      { merchantId: "1002", merchantName: "Second", productTitles: ["Vacuum cleaner"] },
+      { merchantId: "1004", merchantName: "Catalog only", productTitles: ["Vacuum cleaner"] }
+    ] };
+    const session = createAgentSession({ offers: keywordOffers, language: "en", getProductKeywords: () => catalog, enableQuestionLogging: false, enableTrace: false });
+    const result = await session.executeTool({ callId: "keyword-recommend", toolName: "keyword_search", arguments: { keyword: "vacuum cleaner", mode: "recommendation", limit: 3 }, prompt: "vacuum cleaner brand recommendation", signal: new AbortController().signal });
+    const data = (result.toolResult.result as { data: { rows: Array<Record<string, unknown>>; matchedCount: number; unrankedCount: number } }).data;
+    expect(data.rows.map((row) => row.merchantId)).toEqual(["1002", "1001", "1004"]);
+    expect(data.rows.map((row) => row.rank)).toEqual([1, 2, undefined]);
+    expect(data).toMatchObject({ matchedCount: 3, unrankedCount: 1 });
+    expect(result.resultView?.rows).toHaveLength(3);
+  });
+
+  it("无效的商户指标不能被当作零值参与关键词推荐排序", async () => {
+    const catalog = { ok: true, checkedAt: "2026-09-22", merchants: [{ merchantId: "1001", merchantName: "Missing metrics", productTitles: ["Vacuum cleaner"] }] };
+    const session = createAgentSession({
+      offers: [{ merchantId: "1001", merchantName: "Missing metrics", tier: "Tier 1", salesAmount: "Not provided" }],
+      language: "en", getProductKeywords: () => catalog, enableQuestionLogging: false, enableTrace: false
+    });
+    const result = await session.executeTool({ callId: "keyword-missing", toolName: "keyword_search", arguments: { keyword: "vacuum cleaner", mode: "recommendation" }, prompt: "vacuum cleaner brand recommendation", signal: new AbortController().signal });
+    expect(result.toolResult.result).toMatchObject({ ok: true, data: { unrankedCount: 1, rows: [{ merchantId: "1001", ranked: false }] } });
+    const row = ((result.toolResult.result as { data: { rows: Array<Record<string, unknown>> } }).data.rows)[0]!;
+    expect(row.rank).toBeUndefined();
+    expect(row.salesAmount).toBeUndefined();
+  });
+
+  it("按佣金排序时在工具结果和表格中展示实际参与比较的指标", async () => {
+    const catalog = { ok: true, merchants: [
+      { merchantId: "1001", merchantName: "First", productTitles: ["Vacuum cleaner"] },
+      { merchantId: "1002", merchantName: "Second", productTitles: ["Vacuum cleaner"] }
+    ] };
+    const session = createAgentSession({
+      offers: [
+        { merchantId: "1001", merchantName: "First", tier: "Tier 1", affCommission: 50 },
+        { merchantId: "1002", merchantName: "Second", tier: "Tier 1", affCommission: 100 }
+      ],
+      language: "en", getProductKeywords: () => catalog, enableQuestionLogging: false, enableTrace: false
+    });
+    const result = await session.executeTool({ callId: "keyword-commission", toolName: "keyword_search", arguments: { keyword: "vacuum cleaner", mode: "recommendation" }, prompt: "vacuum cleaner brand recommendation", signal: new AbortController().signal });
+    const data = (result.toolResult.result as { data: { rows: Array<Record<string, unknown>> } }).data;
+    expect(data.rows.map((row) => row.merchantId)).toEqual(["1002", "1001"]);
+    expect(data.rows.map((row) => row.affCommission)).toEqual([100, 50]);
+    expect(result.resultView?.columns).toContain("affCommission");
+  });
+
+  it("规划关键词工具后把有界结果传入综合，综合不可用时兜底表格仍保留排名指标", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+      calls.push({ url, body });
+      if (url === "/api/chat/agent") return response({ ok: true, agentRunId: "ar_keyword_tool_1234", planProof: "signed-proof", toolCalls: [
+        { id: "r1c1", name: "keyword_search", arguments: { keyword: "vacuum cleaner", mode: "recommendation" } }
+      ] });
+      if (url === "/api/chat/stream") return response({ ok: false, errorCode: "agent_synthesis_unavailable" }, 503);
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const session = createAgentSession({
+      offers: [{ merchantId: "1001", merchantName: "Vac One", tier: "Tier 1", affCommission: 50 }],
+      getProductKeywords: () => ({ ok: true, merchants: [{ merchantId: "1001", merchantName: "Vac One", productTitles: ["Vacuum cleaner"] }] }),
+      language: "en", fetcher, enableQuestionLogging: false, enableTrace: false
+    });
+    const result = await session.submit({ prompt: "vacuum cleaner brand recommendation", language: "en", history: [], memoryText: "", signal: new AbortController().signal });
+    const synthesis = calls.find((call) => call.url === "/api/chat/stream");
+    expect((synthesis?.body.toolResults as Array<Record<string, unknown>>)[0]).toMatchObject({ toolName: "keyword_search", result: { data: { rows: [{ affCommission: 50 }] } } });
+    expect(result.response).toContain("Vac One");
+    expect(result.response).toContain("affCommission");
+    expect(result.response).toContain("50");
+  });
+
+  it("关键词目录读取失败时区分部分命中与搜索数据不可用", async () => {
+    const fail = async () => { throw new Error("keyword service unavailable"); };
+    const partial = createAgentSession({ offers: [{ merchantId: "1001", merchantName: "First", tier: "Tier 1", productTitles: ["Vacuum cleaner"] }], language: "en", getProductKeywords: () => ({}), loadKeywords: fail, enableQuestionLogging: false, enableTrace: false });
+    const request = { callId: "partial", toolName: "keyword_search" as const, arguments: { keyword: "vacuum cleaner" }, prompt: "find vacuum cleaner merchants", signal: new AbortController().signal };
+    const partialResult = await partial.executeTool(request);
+    expect(partialResult.toolResult.result).toMatchObject({ ok: true, data: { partial: true, matchedCount: 1 } });
+    const unavailable = createAgentSession({ offers: [{ merchantId: "1002", merchantName: "Other", tier: "Tier 1" }], language: "en", getProductKeywords: () => ({}), loadKeywords: fail, enableQuestionLogging: false, enableTrace: false });
+    const unavailableResult = await unavailable.executeTool(request);
+    expect(unavailableResult.toolResult.result).toMatchObject({ ok: false, source: { dataSource: "unavailable" } });
+    const categoryMatch = createAgentSession({ offers: [{ merchantId: "1003", merchantName: "Other", category: "Vacuum cleaner", tier: "Tier 1" }], language: "en", getProductKeywords: () => ({}), loadKeywords: fail, enableQuestionLogging: false, enableTrace: false });
+    const categoryResult = await categoryMatch.executeTool(request);
+    expect(categoryResult.toolResult.result).toMatchObject({ ok: true, data: { partial: true, rows: [{ merchantId: "1003", matchedField: "category" }] } });
+  });
+
+  it("关键词品牌推荐未调用工具时不接受模型直接编出的品牌名单", async () => {
+    const session = createAgentSession({
+      offers, language: "en", enableQuestionLogging: false, enableTrace: false,
+      fetcher: async () => response({ ok: true, agentRunId: "ar_keyword_no_tool_1234", content: "Brand X is the best vacuum cleaner brand.", toolCalls: [] })
+    });
+    const result = await session.submit({ prompt: "vacuum cleaner brand recommendation", language: "en", history: [], memoryText: "", signal: new AbortController().signal });
+    expect(result.response).not.toContain("Brand X");
+    expect(result.response).toContain("verifiable data source");
+  });
+
+  it("关键词问题被误规划为商户工具时不把错误工具结果当作品牌依据", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/chat/agent") return response({ ok: true, agentRunId: "ar_keyword_wrong_tool_1234", planProof: "signed-proof", toolCalls: [
+        { id: "r1c1", name: "merchant_analysis", arguments: { merchant: "vacuum cleaner" } }
+      ] });
+      throw new Error("关键词问题不应继续调用商户工具或综合");
+    });
+    const session = createAgentSession({ offers, language: "en", fetcher, enableQuestionLogging: false, enableTrace: false });
+    const result = await session.submit({ prompt: "vacuum cleaner brand recommendation", language: "en", history: [], memoryText: "", signal: new AbortController().signal });
+    expect(result.response).toContain("verifiable data source");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("关键词目录不可用时不采信综合模型自行补出的品牌", async () => {
+    let planningCalls = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/chat/agent") {
+        planningCalls += 1;
+        return planningCalls === 1
+          ? response({ ok: true, agentRunId: "ar_keyword_unavailable_1234", planProof: "signed-proof", toolCalls: [{ id: "r1c1", name: "keyword_search", arguments: { keyword: "vacuum cleaner" } }] })
+          : response({ ok: false, errorCode: "agent_planning_unavailable" }, 503);
+      }
+      return streamResponse("Brand X is the best vacuum cleaner brand.");
+    });
+    const session = createAgentSession({ offers: [], language: "en", loadKeywords: async () => { throw new Error("unavailable"); }, fetcher, enableQuestionLogging: false, enableTrace: false });
+    const result = await session.submit({ prompt: "vacuum cleaner brand recommendation", language: "en", history: [], memoryText: "", signal: new AbortController().signal });
+    expect(result.response).toContain("Keyword data is unavailable");
+    expect(result.response).not.toContain("Brand X");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["查询关键词 vacuum cleaner", "Search product keyword vacuum cleaner"])("%s 未调用工具时不接受直接名单", async (prompt) => {
+    const session = createAgentSession({
+      offers, language: "en", enableQuestionLogging: false, enableTrace: false,
+      fetcher: async () => response({ ok: true, agentRunId: "ar_keyword_command_1234", content: "Brand X", toolCalls: [] })
+    });
+    const result = await session.submit({ prompt, language: "en", history: [], memoryText: "", signal: new AbortController().signal });
+    expect(result.response).not.toContain("Brand X");
+  });
+
+
   it("商户完整详情合并历史月份并直接展示月度表，空指标不补零", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://localhost");

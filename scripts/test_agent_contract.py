@@ -17,6 +17,7 @@ from agent_contract import (
     validate_synthesis_request,
     verify_plan_proof,
 )
+from chat_agent_http import agent_planning_system_prompt, agent_synthesis_system_prompt
 
 
 def _with_secret(secret, callback):
@@ -76,6 +77,20 @@ def test_planning_contract_normalizes_only_safe_fields():
     assert request["question"] == "Shokz EPC"
     assert request["enabledTools"] == ["merchant_analysis", "trend"]
     assert request["trace"]["tracePhase"] == "planning"
+
+
+def test_keyword_search_is_planned_and_synthesized_as_evidence():
+    body = _valid_planning_body()
+    body["question"] = "vacuum cleaner brand recommendation"
+    body["enabledTools"] = ["keyword_search"]
+    request, error = validate_planning_request(body)
+    assert error is None and request["enabledTools"] == ["keyword_search"]
+    for language in ("zh", "en"):
+        planning = agent_planning_system_prompt(language)
+        synthesis = agent_synthesis_system_prompt(language)
+        assert "keyword_search" in planning
+        assert "brand recommendation" in planning
+        assert "keyword_search" in synthesis
 
 
 def test_planning_messages_do_not_include_client_history_or_retry_text():

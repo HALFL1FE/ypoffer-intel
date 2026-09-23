@@ -5,7 +5,7 @@ import { CopilotKitProvider, type VueFrontendTool } from "@copilotkit/vue/v2";
 import type { UiLanguage } from "../../shared/i18n";
 import AgentPage, { type AgentRunner, type AgentRunRequest } from "./AgentPage.vue";
 import CopilotKitAgentRuntime from "./CopilotKitAgentRuntime.vue";
-import type { AgentSession, AgentToolExecutionResponse, AgentToolName, AgentViewSession } from "./agentSession";
+import { isKeywordDataQuestion, keywordMissingDataResponse, type AgentSession, type AgentToolExecutionResponse, type AgentToolName, type AgentViewSession } from "./agentSession";
 import type { AgentAttachmentStore } from "./agentAttachment";
 import { readMerchantWorkbook } from "../../shared/import/merchantWorkbook";
 
@@ -50,6 +50,7 @@ const toolNames = [
   "payment_status",
   "trend",
   "asin_analysis",
+  "keyword_search",
   "promotion_analysis"
 ] as const;
 
@@ -104,6 +105,13 @@ function beginRun(request: AgentRunRequest): AgentToolRunSession {
         }
         const fallback = await props.fallbackRun(request);
         return { ...fallback, fallbackDelivered: fallback.ok };
+      }
+      const keywordView = resultViews.find((view) => view.toolName === "keyword_search");
+      if (isKeywordDataQuestion(request.prompt) && (!keywordView || keywordView.status === "error")) {
+        return {
+          ok: true, status: "done", response: keywordView?.message || keywordMissingDataResponse(request.language),
+          steps: [], partial: false, omittedTargets: [], memoryEvents: [], resultViews
+        };
       }
       return {
         ok: Boolean(response.trim()),

@@ -1,6 +1,8 @@
 import type { UiLanguage } from "../../shared/i18n";
 import { notifyAuthFailure } from "../../shared/api/client";
 import { mergeMerchantMonths } from "../chatbot/report/trendReports";
+import { createReportDataProvider } from "../chatbot/report/reportDataProvider";
+import { searchAgentKeywords } from "./agentKeywordSearch";
 import { consumeSseResponse } from "../../shared/stream/sse";
 import {
   normalizeAgentResultView,
@@ -42,6 +44,7 @@ export type AgentToolName =
   | "payment_status"
   | "trend"
   | "asin_analysis"
+  | "keyword_search"
   | "promotion_analysis";
 
 type ToolName = AgentToolName;
@@ -55,6 +58,7 @@ export const AGENT_TOOL_NAMES: readonly ToolName[] = [
   "payment_status",
   "trend",
   "asin_analysis",
+  "keyword_search",
   "promotion_analysis"
 ];
 
@@ -173,6 +177,10 @@ export interface AgentSessionOptions {
     readonly endDate: string | null;
   };
   readonly loadPromotionReport?: PromotionReportLoader;
+  readonly getOffers?: () => readonly Row[];
+  readonly getProductKeywords?: () => unknown;
+  readonly loadOffers?: (signal: AbortSignal) => Promise<unknown>;
+  readonly loadKeywords?: (signal: AbortSignal) => Promise<unknown>;
 }
 
 interface AgentToolCall {
@@ -569,7 +577,26 @@ function isDataQuestion(prompt: string): boolean {
   if (!value) return false;
   if (/(?:what is|definition|meaning|how to calculate|\u4ec0\u4e48\u662f|\u542b\u4e49|\u5982\u4f55\u8ba1\u7b97)/i.test(value)
     && !/(?:current|latest|how many|show|list|data|\u5f53\u524d|\u6700\u65b0|\u591a\u5c11|\u67e5\u8be2|\u5217\u51fa|\u6570\u636e)/i.test(value)) return false;
-  return /(?:\basin\b|\bB[0-9A-Z]{9}\b|epc|aov|cvr|conversion|revenue|sales|orders|clicks|commission|payout|payment|trend|monthly|merchant|category|tier|report|data|\u4ed8\u6b3e|\u6536\u5165|\u8ba2\u5355|\u70b9\u51fb|\u8d8b\u52bf|\u6708\u5ea6|\u5546\u6237|\u54c1\u7c7b|\u5c42\u7ea7|\u6570\u636e)/i.test(value);
+  return isKeywordDataQuestion(value) || /(?:\basin\b|\bB[0-9A-Z]{9}\b|epc|aov|cvr|conversion|revenue|sales|orders|clicks|commission|payout|payment|trend|monthly|merchant|category|tier|report|data|\u4ed8\u6b3e|\u6536\u5165|\u8ba2\u5355|\u70b9\u51fb|\u8d8b\u52bf|\u6708\u5ea6|\u5546\u6237|\u54c1\u7c7b|\u5c42\u7ea7|\u6570\u636e)/i.test(value);
+}
+
+export function isKeywordDataQuestion(prompt: string): boolean {
+  return /(?:^\s*\/?keyword\b|^\s*(?:查询|搜索|查找)\s*关键词|^\s*(?:search|find)\s+(?:product\s+)?keywords?\b|brand\s+recommendation|(?:产品|商品)关键词|关键词\s*[:：]|推荐.*品牌|查找.*商家|相关商家|哪些品牌做)/i.test(prompt);
+}
+
+export function keywordMissingDataResponse(language: UiLanguage): string {
+  return language === "en"
+    ? "I do not have a verifiable data source for this keyword query. Retry or provide a product keyword."
+    : "关键词查询尚未取得可验证的数据来源。请重试或补充产品关键词。";
+}
+
+function keywordFailureMessage(errorCode: string | undefined, language: UiLanguage, keyword: string): string {
+  if (errorCode === "not_found") return language === "en"
+    ? `No merchants matched "${keyword}" in the available keyword data.`
+    : `当前可用的关键词数据中没有匹配“${keyword}”的商户。`;
+  return language === "en"
+    ? `Keyword data is unavailable for "${keyword}"; this does not mean no merchants exist.`
+    : `“${keyword}”的关键词数据暂不可用，这不代表数据库中没有相关商户。`;
 }
 
 function hasVerifiableContext(prompt: string, memory: string, history: readonly AgentHistoryMessage[]): boolean {
@@ -1417,6 +1444,56 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     }, dataSource, dataAsOf, estimated);
   }
 
+  async function executeKeywordSearch(args: Record<string, unknown>, signal: AbortSignal): Promise<AgentToolResult> {
+    const keyword = typeof args.keyword === "string" ? args.keyword.trim() : "";
+    const mode = args.mode === undefined ? "search" : args.mode;
+    const limit = args.limit === undefined ? 10 : args.limit;
+    if (keyword.length < 2 || keyword.length > 120 || (mode !== "search" && mode !== "recommendation")
+      || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 20) {
+      return failure("invalid_arguments", "unavailable", { status: "invalid_filter", field: "keyword" });
+    }
+    const provider = createReportDataProvider({
+      offers: options.getOffers?.() || offers,
+      keywords: options.getProductKeywords?.() || {},
+      source: "cache",
+      asOf: options.dataAsOf || null,
+      preferRemote: Boolean(options.loadOffers),
+      loadOffers: options.loadOffers,
+      loadKeywords: options.loadKeywords
+    });
+    const offerRows = await provider.offers(signal);
+    let productKeywords: unknown = {};
+    let keywordUnavailable = false;
+    try {
+      productKeywords = await provider.keywords(signal);
+      if (isRecord(productKeywords) && productKeywords.ok === false) keywordUnavailable = true;
+      else if (!Array.isArray(productKeywords) && (!isRecord(productKeywords)
+        || (!Array.isArray(productKeywords.merchants) && !Array.isArray(productKeywords.rows)
+          && !Array.isArray(productKeywords.keywords) && !Array.isArray(productKeywords.items)))) keywordUnavailable = true;
+    } catch (error) {
+      if (isAbortError(error, signal)) throw error;
+      keywordUnavailable = true;
+    }
+    if (signal.aborted) throw new DOMException("Keyword search aborted", "AbortError");
+    if (keywordUnavailable && !offerRows.length) {
+      return failure("tool_error", "unavailable", { status: "unavailable", field: "keywords" });
+    }
+    const data = searchAgentKeywords(keyword, mode, Number(limit), offerRows, keywordUnavailable ? {} : productKeywords, currentLanguage, keywordUnavailable);
+    const source = provider.snapshot();
+    const dataSource: DataSource = source.offersLoadedFrom === "db" ? "mixed" : "cache";
+    const rawCheckedAt = isRecord(productKeywords) && typeof productKeywords.checkedAt === "string" ? productKeywords.checkedAt : "";
+    const checkedAt = /^\d{4}-\d{2}-\d{2}/.test(rawCheckedAt) ? rawCheckedAt.slice(0, 40) : null;
+    if (!data.matchedCount && keywordUnavailable) return failure("tool_error", "unavailable", { status: "unavailable", field: "keywords" });
+    if (!data.matchedCount && normalizeChatbotText(keyword) !== "audio") {
+      return failure("not_found", dataSource, { status: "not_found", field: "keyword", value: keyword });
+    }
+    const note = checkedAt
+      ? `${data.note} ${currentLanguage === "zh" ? "关键词目录截至" : "Keyword catalog as of"} ${checkedAt}.`
+      : data.note;
+    return success({ ...data, note, ...(checkedAt ? { keywordCheckedAt: checkedAt } : {}) }, dataSource,
+      source.offersLoadedFrom === "db" ? null : source.asOf);
+  }
+
   async function executeTool(
     call: AgentToolCall,
     prompt: string,
@@ -1431,6 +1508,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       if (call.name === "category_comparison") return executeCategoryComparison(call.arguments);
       if (call.name === "payment_status") return executePaymentStatus(call.arguments, prompt);
       if (call.name === "asin_analysis") return executeAsinAnalysis(call.arguments, signal);
+      if (call.name === "keyword_search") return executeKeywordSearch(call.arguments, signal);
       if (call.name === "promotion_analysis") {
         if (!promotionAttachment) return failure("invalid_arguments", "unavailable", { status: "invalid_filter", field: "attachment" });
         if (!loadPromotionReport) return failure("tool_error", "unavailable", { status: "unavailable", field: "promotion_report" });
@@ -1459,6 +1537,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     if (call.name === "merchant_comparison") return Array.isArray(args.merchants) ? args.merchants.map((item) => text(item, 80)).join(", ") : call.name;
     if (call.name === "category_comparison") return Array.isArray(args.categories) ? args.categories.map((item) => text(item, 120)).join(", ") : call.name;
     if (call.name === "asin_analysis") return Array.isArray(args.asins) ? args.asins.map((item) => text(item, 20).toUpperCase()).join(", ") : call.name;
+    if (call.name === "keyword_search") return text(args.keyword, 120) || call.name;
     if (call.name === "promotion_analysis") return text(args.view, 40) || call.name;
     return [args.merchant, args.month, args.status, args.tier].map((item) => text(item, 80)).filter(Boolean).join(" / ") || call.name;
   }
@@ -1557,6 +1636,27 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       if (typeof value === "string" || typeof value === "boolean") return text(value, 120);
       return "";
     };
+    if (item.call.name === "keyword_search") {
+      const sourceRows = Array.isArray(data.rows) ? data.rows.filter(isRecord) : [];
+      const recommendation = data.mode === "recommendation";
+      const columns = ["merchantId", "matchedField", "matchedText", ...(recommendation
+        ? ["salesAmount", "orders", "conversionRate", "aov", "epc", "affCommission", "clicks"].filter((column) => sourceRows.some((row) => typeof row[column] === "number"))
+        : [])];
+      const rows = sourceRows.map((row) => ({
+        label: `${recommendation && typeof row.rank === "number" ? `#${row.rank} · ` : ""}${text(row.merchantName, 120)}`,
+        values: columns.map((column) => scalar(column, row[column]))
+      })).filter((row) => row.label && row.values.some(Boolean));
+      return normalizeAgentResultView({
+        id: item.call.id, toolName: item.call.name,
+        kind: result.ok ? (rows.length ? "table" : "summary") : "status",
+        status: result.ok ? (data.partial === true || data.truncated === true ? "partial" : "done") : "error",
+        title: text(data.headline, 180) || toolTarget(item.call),
+        source: result.source.dataSource, dataAsOf: result.source.dataAsOf,
+        estimated: false, partial: data.partial === true || data.truncated === true,
+        metrics: [], columns, rows,
+        message: result.ok ? text(data.note, 800) : keywordFailureMessage(result.errorCode, currentLanguage, toolTarget(item.call))
+      });
+    }
     if (item.call.name === "merchant_analysis" && Array.isArray(data.monthly) && data.monthly.length) {
       const keys = ["clicks", "orders", "revenue", "commission", "payout", "epc", "aov", "conversionRate"];
       const labels = currentLanguage === "en"
@@ -1669,7 +1769,9 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     executions.forEach((item) => {
       const data = item.result.data || {};
       if (!item.result.ok) {
-        lines.push((language === "en" ? "Data unavailable for " : "\u6570\u636e\u4e0d\u53ef\u7528\uff1a") + toolTarget(item.call) + ".");
+        lines.push(item.call.name === "keyword_search"
+          ? keywordFailureMessage(item.result.errorCode, language, toolTarget(item.call))
+          : (language === "en" ? "Data unavailable for " : "\u6570\u636e\u4e0d\u53ef\u7528\uff1a") + toolTarget(item.call) + ".");
         return;
       }
       if (item.call.name === "asin_analysis" && Array.isArray(data.rows)) {
@@ -1687,7 +1789,24 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       }
       const headline = text(data.headline, 240);
       if (headline) lines.push(headline);
-      if (item.call.name === "asin_analysis" && Array.isArray(data.rows)) {
+      if (item.call.name === "keyword_search" && Array.isArray(data.rows)) {
+        const sourceRows = data.rows.filter(isRecord);
+        const metrics = ["salesAmount", "orders", "conversionRate", "aov", "epc", "affCommission", "clicks"]
+          .filter((field) => data.mode === "recommendation" && sourceRows.some((row) => typeof row[field] === "number"));
+        const headings = language === "zh" ? ["排名", "商户", "Merchant ID", "命中字段", "命中依据"] : ["Rank", "Merchant", "Merchant ID", "Matched field", "Evidence"];
+        const columns = [...(data.mode === "recommendation" ? headings : headings.slice(1)), ...metrics];
+        lines.push(`| ${columns.join(" | ")} |\n| ${columns.map(() => "---").join(" | ")} |`);
+        const cell = (value: unknown, maxLength: number): string => text(value, maxLength).replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ");
+        sourceRows.forEach((row) => {
+          const values = [
+            ...(data.mode === "recommendation" ? [typeof row.rank === "number" ? `#${row.rank}` : "-"] : []),
+            cell(row.merchantName, 120), cell(row.merchantId, 80), cell(row.matchedField, 40), cell(row.matchedText, 80),
+            ...metrics.map((field) => typeof row[field] === "number" ? formatAgentResultNumber(field, row[field]) : "N/A")
+          ];
+          lines.push(`| ${values.join(" | ")} |`);
+        });
+        if (text(data.note, 800)) lines.push(text(data.note, 800));
+      } else if (item.call.name === "asin_analysis" && Array.isArray(data.rows)) {
         const cell = (value: string) => value.replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ");
         lines.push([
           language === "en" ? "| ASIN | Field | Value |\n| --- | --- | --- |" : "| ASIN | 信息 | 内容 |\n| --- | --- | --- |",
@@ -1965,7 +2084,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
         emitStep(planningStep);
         appendTraceStep(trace, planningStep, ++traceSequence);
         if (isDataQuestion(prompt)) {
-          const safeResponse = missingDataResponse(currentLanguage);
+          const safeResponse = isKeywordDataQuestion(prompt) ? keywordMissingDataResponse(currentLanguage) : missingDataResponse(currentLanguage);
           const result = commitDone(baseHistory, prompt, safeResponse, false, [], [], "no_verifiable_source");
           completeTrace(trace, { status: "done", partial: false, stopped: false, fallback: true, planned: 0, executed: 0, failed: 0, errorCode: "no_verifiable_source" });
           await completeQuestion("success");
@@ -1988,10 +2107,17 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       emitStep(planningStep);
       appendTraceStep(trace, planningStep, ++traceSequence);
       if (!activePlan.toolCalls.length) {
-        const direct = activePlan.content || (isDataQuestion(prompt) && !hasVerifiableContext(prompt, request.memoryText, baseHistory)
+        const direct = isKeywordDataQuestion(prompt) ? keywordMissingDataResponse(currentLanguage) : activePlan.content || (isDataQuestion(prompt) && !hasVerifiableContext(prompt, request.memoryText, baseHistory)
           ? missingDataResponse(currentLanguage) : missingDataResponse(currentLanguage));
         const result = commitDone(baseHistory, prompt, direct, false, [], [], activePlan.content ? undefined : "no_verifiable_source");
         completeTrace(trace, { status: "done", partial: false, stopped: false, fallback: !activePlan.content, planned: 0, executed: 0, failed: 0, errorCode: activePlan.content ? null : "no_verifiable_source" });
+        await completeQuestion("success");
+        return result;
+      }
+
+      if (isKeywordDataQuestion(prompt) && !activePlan.toolCalls.some((call) => call.name === "keyword_search")) {
+        const result = commitDone(baseHistory, prompt, keywordMissingDataResponse(currentLanguage), false, [], [], "no_verifiable_source");
+        completeTrace(trace, { status: "done", partial: false, stopped: false, fallback: true, planned: plannedCount, executed: 0, failed: 0, errorCode: "no_verifiable_source" });
         await completeQuestion("success");
         return result;
       }
@@ -2029,6 +2155,16 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
       }
       omittedTargets = omitted.slice(0, 20);
       partial = Boolean(omitted.length || failedCount);
+      if (isKeywordDataQuestion(prompt) && !allExecutions.some((item) => item.call.name === "keyword_search" && item.result.ok)) {
+        const keywordExecutions = allExecutions.filter((item) => item.call.name === "keyword_search");
+        const safeResponse = keywordExecutions.length
+          ? fallbackAnswer(keywordExecutions, currentLanguage, [])
+          : keywordMissingDataResponse(currentLanguage);
+        const result = commitDone(baseHistory, prompt, safeResponse, partial, omitted, [], "no_verifiable_source");
+        completeTrace(trace, { status: "done", partial, stopped: false, fallback: true, planned: plannedCount, executed: executedCount, failed: failedCount, errorCode: "no_verifiable_source" });
+        await completeQuestion("success");
+        return result;
+      }
       const synthesisStarted = Date.now();
       const synthesisId = "synthesis";
       emitStep(makeStep(synthesisId, "synthesis", "running", stepLabel("synthesis", ""), synthesisStarted));

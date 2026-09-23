@@ -10,6 +10,39 @@ vi.mock("@copilotkit/vue/v2", () => ({ CopilotKitProvider: { name: "Provider", p
 vi.mock("./CopilotKitAgentRuntime.vue", () => ({ default: { name: "Runtime", props: ["beginRun"], template: "<div />" } }));
 
 describe("CopilotKit local result projection", () => {
+  it("关键词推荐没有工具结果时不展示模型直接生成的品牌", async () => {
+    const wrapper = mount(CopilotKitAgentHost, { props: {
+      language: "en", endpoint: "/api/copilotkit", enabled: true,
+      fallbackRun: vi.fn(), toolExecutor: vi.fn()
+    } });
+    const run = wrapper.findComponent({ name: "Runtime" }).props("beginRun")({
+      prompt: "vacuum cleaner brand recommendation", language: "en", history: [],
+      memory: emptyAgentMemory(), memoryText: "", signal: new AbortController().signal
+    });
+    const result = await run.complete("Brand X is the best vacuum cleaner brand.", { synthesisFailed: false, partial: false, omittedTargets: [] });
+    expect(result.response).not.toContain("Brand X");
+    expect(result.response).toContain("verifiable data source");
+    wrapper.unmount();
+  });
+
+  it("关键词推荐即使执行了错误类型的工具，也不采信模型品牌名单", async () => {
+    const toolExecutor = vi.fn(async (): Promise<AgentToolExecutionResponse> => ({
+      toolResult: { callId: "r1c1", result: { ok: true } },
+      resultView: { id: "wrong-tool", toolName: "merchant_analysis", kind: "table", status: "done", title: "Wrong tool", source: "cache", dataAsOf: null, estimated: false, partial: false, metrics: [], columns: [], rows: [], message: "" }
+    }));
+    const wrapper = mount(CopilotKitAgentHost, { props: { language: "en", endpoint: "/api/copilotkit", enabled: true, fallbackRun: vi.fn(), toolExecutor } });
+    const runtime = wrapper.findComponent({ name: "Runtime" });
+    const run = runtime.props("beginRun")({ prompt: "vacuum cleaner brand recommendation", language: "en", history: [], memory: emptyAgentMemory(), memoryText: "", signal: new AbortController().signal });
+    const tool = wrapper.findComponent({ name: "Provider" }).props("frontendTools")
+      .find((candidate: { name: string }) => candidate.name === "merchant_analysis");
+    await tool.handler({ merchant: "vacuum cleaner" }, { toolCall: { id: "r1c1" }, signal: new AbortController().signal });
+    const result = await run.complete("Brand X is the best vacuum cleaner brand.", { synthesisFailed: false, partial: false, omittedTargets: [] });
+    expect(result.response).toContain("verifiable data source");
+    expect(result.response).not.toContain("Brand X");
+    wrapper.unmount();
+  });
+
+
   it("ASIN 详情综合失败时保留价格和商品链接，不重新查询", async () => {
     const agent = createAgentSession({ offers: [], language: "zh", enableTrace: false, enableQuestionLogging: false,
       fetcher: vi.fn(async () => new Response(JSON.stringify({ ok: true, rows: [{ asin: "B09DPRB3TR",
