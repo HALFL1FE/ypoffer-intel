@@ -17,7 +17,7 @@ from agent_tool_registry import (
 )
 
 
-def test_registry_has_exactly_nine_tools():
+def test_registry_has_exactly_ten_tools():
     assert AGENT_TOOL_NAMES == (
         "merchant_analysis",
         "category_analysis",
@@ -27,6 +27,7 @@ def test_registry_has_exactly_nine_tools():
         "payment_status",
         "trend",
         "asin_analysis",
+        "keyword_search",
         "promotion_analysis",
     )
     assert set(AGENT_RESULT_FIELDS) == set(AGENT_TOOL_NAMES)
@@ -62,6 +63,30 @@ def test_tool_definitions_are_language_specific():
     assert zh[0]["name"] == "merchant_analysis"
     assert zh[0]["description"] != en[0]["description"]
     assert zh[0]["parameters"]["required"] == ["merchant"]
+
+
+def test_keyword_search_arguments_and_result_are_bounded():
+    definition = get_agent_tool_definitions("en", ["keyword_search"])[0]
+    assert definition["parameters"]["required"] == ["keyword"]
+    valid, error = validate_tool_arguments("keyword_search", {"keyword": " vacuum cleaner ", "mode": "recommendation", "limit": 5})
+    assert error is None
+    assert valid == {"keyword": "vacuum cleaner", "mode": "recommendation", "limit": 5}
+    for arguments in ({"keyword": "x"}, {"keyword": "x" * 121}, {"keyword": "vacuum cleaner", "limit": 21}, {"keyword": "vacuum cleaner", "mode": "wrong"}, {"keyword": "vacuum cleaner", "rawPrompt": "secret"}):
+        invalid, error = validate_tool_arguments("keyword_search", arguments)
+        assert invalid is None and error["errorCode"] == "invalid_arguments"
+    result, error = validate_tool_result("keyword_search", {
+        "ok": True,
+        "data": {"keyword": "vacuum cleaner", "mode": "search", "rows": [{"merchantId": "1001", "merchantName": "Example", "matchedField": "productTitles", "matchedText": "Vacuum cleaner", "affCommission": 50, "aov": 100}], "matchedCount": 1, "returnedCount": 1, "truncated": False, "unrankedCount": 0, "headline": "Matched merchants", "note": "Snapshot", "keywordCheckedAt": "2026-09-22T00:00:00Z"},
+        "source": {"dataSource": "cache", "dataAsOf": "2026-09-23", "estimated": False},
+    })
+    assert error is None and result["data"]["rows"][0]["merchantId"] == "1001"
+    assert result["data"]["keywordCheckedAt"] == "2026-09-22T00:00:00Z"
+    invalid, error = validate_tool_result("keyword_search", {"ok": True, "data": {"rawKeywords": ["secret"]}})
+    assert invalid is None and error["errorCode"] == "invalid_tool_result"
+    row = {"merchantId": "1001", "merchantName": "Example", "matchedField": "productTitles", "matchedText": "Vacuum cleaner"}
+    for rows in ([row] * 21, [{**row, "rawProductTitles": ["secret"]}], [{**row, "matchedText": "x" * 81}]):
+        invalid, error = validate_tool_result("keyword_search", {"ok": True, "data": {"rows": rows}})
+        assert invalid is None and error["errorCode"] == "invalid_tool_result"
 
 
 def test_promotion_tool_exposes_merchant_media_view():

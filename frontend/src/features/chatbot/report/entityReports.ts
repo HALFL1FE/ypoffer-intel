@@ -289,7 +289,11 @@ export function buildEntityReport(
     }
     const catalog = keywordCatalogValues(productKeywords);
     const catalogMatches = catalog.filter((row) => matchesKeyword(row, keyword) || matchesText(keyword, text(row.keyword)));
-    const visibleCatalog = catalogMatches.filter((row) => keywordVisible(row, query));
+    const offersByMerchantId = new Map(normalized.map((row) => [rowMerchantId(row as RawRecord), row]));
+    const visibleCatalog = catalogMatches.filter((row) => {
+      const offer = offersByMerchantId.get(rowMerchantId(row as RawRecord));
+      return keywordVisible(offer || row, query);
+    });
     const fieldValues = (record: RawRecord, key: string): string[] => {
       const value = record[key];
       return (Array.isArray(value) ? value : [value]).map(text).filter(Boolean);

@@ -40,7 +40,7 @@ INTERNAL_TOKEN_HEADER = "X-OI-Copilot-Token"
 _DATA_PATTERN = re.compile(
     r"当前|最新|最近|本月|上月|多少|数值|数据|查询|统计|列出|展示|提供|每个|分别|哪些|名单|列表|排名|"
     r"top\s*\d+|分析|表现|趋势|付款|收入|销售额|订单|点击|佣金|商户|商家|品牌|品类|tier|payment|"
-    r"revenue|sales|orders|clicks|trend|epc|aov|cvr|merchant|category",
+    r"revenue|sales|orders|clicks|trend|epc|aov|cvr|merchant|category|keyword|brand\s+recommendation",
     re.I,
 )
 _CONCEPT_PATTERN = re.compile(r"什么是|是什么意思|定义|含义|解释|如何计算|怎么算|怎么计算|what is|meaning|definition|how to calculate", re.I)

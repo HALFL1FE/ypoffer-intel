@@ -65,7 +65,7 @@ YeahPromos Offer Intelligence 内建了一个对话式 AI 助手，支持中英�
 #### Agent 工作台、命令与回测
 
 - 新工作台继续挂在 `agentModernRoot`，外部 `primarySidebar` 导航不替换；桌面保留右侧查询详情，窄屏可展开。输入栏在浏览旧内容且没有草稿时收起，点击恢复，尊重 reduced-motion。
-- `/` 菜单复用 `ChatbotCommandMenu.vue`，Agent 展示 11 个可筛选的高频命令，支持方向键、Enter、Escape 和中文输入法；`/merchants`、`/unpaid`、`/revenue`、`/epc`、`/orders` 为隐藏但兼容的历史别名。商户/ASIN/品类/Tier/对比/付款/趋势命令补充原有 Agent 查询；`/publisher`、`/publisherprofile` 通过 `OI_MODERN_RUNTIME.runAgentPublisher` 使用现有媒体数据和 Report renderer，结果通过 `ChatbotResultView` 的结构化 blocks 显示，不向 Python 注册虚构工具；`/promotion` 需先上传推广清单。
+- `/` 菜单复用 `ChatbotCommandMenu.vue`，Agent 展示 12 个可筛选的高频命令，支持方向键、Enter、Escape 和中文输入法；`/merchants`、`/unpaid`、`/revenue`、`/epc`、`/orders` 为隐藏但兼容的历史别名。商户/ASIN/品类/Tier/对比/付款/趋势及 `/keyword` 命令补充原有 Agent 查询；`/publisher`、`/publisherprofile` 通过 `OI_MODERN_RUNTIME.runAgentPublisher` 使用现有媒体数据和 Report renderer，结果通过 `ChatbotResultView` 的结构化 blocks 显示，不向 Python 注册虚构工具；`/promotion` 需先上传推广清单。
 - CopilotKit 页通过 `createAgentActivity()` 保留原问题日志及反馈机制。原 SVG 趋势图、12 指标切换、结果 registry、停止及成功后历史/记忆规则保持。
 - 用户可从“日志 → 对话日志与回测”或错误后的日志面板下载/导入 JSON、主动上传、选择某一轮重新运行并对照原回答。最近最多 10 轮、512 KB；记录问题、原历史与结构化记忆、回答、受控错误码和时间线，不导出 HTML、cookie、plan proof 或原始工具载荷。回测使用原语言/历史/记忆和**当前数据/模型**，不是旧数据快照重放，也不会自动修改代码。
 - 本地和 Vercel 共用 `agent_debug_http.py`，在 `/api/chat/stream?operation=agent_debug` 提供认证后的 POST 写入与 GET `id` 读取；不新增 Vercel function。上传显式写入 `cnpscy_oi_agent_debug_cases`，首写按现有 DB 模式建表；无 DDL 权限时可预先使用 `docs/agent-debug-cases.sql`。存储不可用返回 502，前端保留下载入口。未向真实 DB 写入测试日志。
@@ -416,6 +416,8 @@ call_llm_tools()   → Agent 规划调用，归一化 DeepSeek/Claude 工具结�
 
 `asin_analysis` 通过同源 `/api/ui/db/asin?asins=...&months=12` 读取 ASIN 产品、商户和月份表现；Agent 只向综合模型传递受控的 `rows`、`monthly`、`notFound`、来源和时间字段，最多处理 5 个 ASIN。
 
+`keyword_search` 通过当前商户快照与 `/api/ui/db/keywords` 关键词目录复用 Report Mode 的匹配和 Merchant ID 合并规则，支持自然语言产品词查询、品牌推荐与 `/keyword`。搜索展示命中字段和片段；推荐只对有可用商户快照指标的命中商户沿用既有比较顺序，目录独有商户保留为未排名，不能解读为该产品或 ASIN 的销量排行。结果最多返回 20 家，并标记截断、目录不可用时的部分命中及目录 `checkedAt`；目录时间不冒充商户指标时间。无命中与数据不可用分开呈现，工具结果不写入结构化记忆。
+
 `promotion_analysis` 只在当前请求带有服务端校验过的 `promotionContext` 时启用。`file` 视图只读取浏览器本机标准化清单，不访问数据库；`merchants`、`categories`、`history` 复用推广追踪普通报告；`merchant_media` 按商家统计有活动的非空媒体 ID（排除 `0`）并去重；`publishers`、`links` 复用关系报告。工具执行前校验附件 ID、清单内商家范围和已确认日期，结果最多 25 行并限制为 18,000 字节；媒体总额与链接明细不相加，缺失目标 ASIN 不从成交 ASIN 推断。主 AG-UI 链路和降级 session 链路都传递同一附件快照。明确的媒体数量排名问题在无工具计划时会修复为受限的 `merchant_media` 调用。
 
 `merchant_analysis` 的 `metrics` 是当前缓存商户汇总，`monthly` 是按最新月份在前排列的真实 DB 月度数据。月度数据由 `fetchMerchantMonthlyRows()` → `fetchMerchantMetrics()` → `/api/ui/db/merchant?months=12&minimal=1` 获取，并使用 `mergeMonthIntoOffer()` 保持与 Report Mode 月份概览相同的 EPC、AOV、CVR、Commission、Orders、Clicks、DPV 和 ATC 口径；月度接口不可用时 `monthly=[]`、`monthlyDataSource="unavailable"`，不伪造月度值。综合模型若只引用最新月份，`runChatAgent()` 会从已完成的工具结果中补回完整月度表。
@@ -619,7 +621,7 @@ public/
 ```
 llm_provider.py               ← LLM Provider 抽象（DeepSeek/Claude）
 chat_agent_http.py            ← Chat Mode Agent 规划端点、工具白名单和双语提示词
-agent_tool_registry.py        ← 九个 Agent 工具的唯一注册表、参数和结果白名单
+agent_tool_registry.py        ← 十个 Agent 工具的唯一注册表、参数和结果白名单
 agent_contract.py             ← Agent v2 请求校验、计划证明和服务端消息组装
 llm_classify.py               ← 意图分类 + 分析文字生成编排层
 server.py                     ← 本地服务器（/api/chat/* 路由）
@@ -767,7 +769,7 @@ Trace 写入是异步、短超时和可丢弃的：网络或数据库写入失�
 
 ### Agent 服务端工具注册表与 v2 协议（2026-08-27）
 
-4.2 已完成。`agent_tool_registry.py` 是九个只读工具的唯一规范来源：`merchant_analysis`、`category_analysis`、`merchant_comparison`、`tier_analysis`、`category_comparison`、`payment_status`、`trend`、`asin_analysis` 和 `promotion_analysis`。注册表同时维护双语描述、参数 Schema、参数范围、结果字段白名单、结果来源和大小限制；浏览器只能提交 `enabledTools` 名称集合，不能提交工具描述或 Schema。
+4.2 已完成。`agent_tool_registry.py` 是十个只读工具的唯一规范来源：`merchant_analysis`、`category_analysis`、`merchant_comparison`、`tier_analysis`、`category_comparison`、`payment_status`、`trend`、`asin_analysis`、`keyword_search` 和 `promotion_analysis`。注册表同时维护双语描述、参数 Schema、参数范围、结果字段白名单、结果来源和大小限制；浏览器只能提交 `enabledTools` 名称集合，不能提交工具描述或 Schema。
 
 规划请求 `POST /api/chat/agent` 使用 `contractVersion: "v2"`，只接收问题、语言、启用工具集合和受控 Trace 元数据。服务端返回规范化的 `agentRunId`、`r{round}c{index}` 调用 ID、`registryVersion: "agent-tools-v1"` 和一次性使用的 `planProof`。工具失败时，最多进行一轮结构化重规划；重规划只提交前一轮证明、失败调用 ID 和固定错误码，不传递浏览器原始错误文本或自由消息。
 

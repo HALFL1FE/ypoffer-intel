@@ -94,4 +94,18 @@ describe("entityReports", () => {
     expect(result.note).toContain("headphones");
     expect(result.rows).toEqual([]);
   });
+
+  it("关键词目录行不能使默认隐藏的 Tier 4 商户重新出现", () => {
+    const query = resolveReportQuery("/keyword vacuum cleaner", { language: "en", categories: [] });
+    const offers = [
+      { merchantId: "1001", merchantName: "Visible", tier: "Tier 1" },
+      { merchantId: "1002", merchantName: "Hidden", tier: "Tier 4" }
+    ];
+    const productKeywords = { merchants: [
+      { merchantId: "1001", merchantName: "Visible", productTitles: ["Vacuum cleaner"] },
+      { merchantId: "1002", merchantName: "Hidden", productTitles: ["Vacuum cleaner"] }
+    ] };
+    const result = buildEntityReport(query, offers, productKeywords, "en");
+    expect(result.rows.map((row) => row.merchantId)).toEqual(["1001"]);
+  });
 });

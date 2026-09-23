@@ -34,6 +34,11 @@ class FakeTarget:
 
 
 class AgentAguiTests(unittest.TestCase):
+    def test_keyword_brand_recommendation_requires_verified_data(self):
+        self.assertTrue(agent_agui._requires_verifiable_data("vacuum cleaner brand recommendation"))
+        self.assertTrue(agent_agui._requires_verifiable_data("/keyword vacuum cleaner"))
+        self.assertFalse(agent_agui._requires_verifiable_data("what is keyword search"))
+
     def test_asin_followup_context_reaches_planning(self):
         body = self.body()
         asins = ["B0D2HKCMBP", "B09BVXT8TJ"]
