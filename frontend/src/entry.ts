@@ -948,6 +948,10 @@ function agentSession(snapshot: AppBootstrapData): AgentSession {
       storage: browserStorage(),
       agentEnabled: snapshot.agentEnabled,
       dataAsOf: stringValue(sources.checkedAt) || null,
+      getOffers: () => offerRecords(getAppSnapshot().value),
+      getProductKeywords: () => getAppSnapshot().value.productKeywords,
+      loadOffers: (signal) => apiRequest<unknown>("/api/ui/db/chatbot-offers", { signal }),
+      loadKeywords: (signal) => apiRequest<unknown>("/api/ui/db/keywords", { signal }),
       asinRankingContext: {
         version: typeof data.asinRankingVersion === "number" ? data.asinRankingVersion : null,
         startDate: stringValue(data.startDate) || null,

@@ -34,6 +34,7 @@ AGENT_TOOL_NAMES = (
     "payment_status",
     "trend",
     "asin_analysis",
+    "keyword_search",
     "promotion_analysis",
 )
 AGENT_TIER_NAMES = ("Tier 1", "Tier 2", "Tier 3", "Tier 4", "BLACK TIER")
@@ -86,6 +87,10 @@ AGENT_RESULT_FIELDS = {
     "asin_analysis": (
         "asins", "rows", "monthly", "notFound", "headline", "note",
         "source", "dataAsOf",
+    ),
+    "keyword_search": (
+        "keyword", "mode", "rows", "matchedCount", "returnedCount",
+        "truncated", "unrankedCount", "headline", "note", "partial", "keywordCheckedAt",
     ),
     "promotion_analysis": tuple(PROMOTION_RESULT_FIELDS),
 }
@@ -313,6 +318,21 @@ def _build_specs() -> dict[str, dict[str, Any]]:
             },
             "argument_fields": ("asins", "view"),
         },
+        "keyword_search": {
+            "description_zh": "按产品关键词查找匹配商户；用户明确要求品牌推荐时按命中商户的整体快照表现排序，不代表该产品销量。",
+            "description_en": "Find merchants matching a product keyword; for explicit brand recommendations, rank matched merchants by overall snapshot performance, not product sales.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": _text_property("产品关键词，不包含推荐等意图词。", "Product keyword without recommendation intent words.", 120),
+                    "mode": {"type": "string", "enum": ["search", "recommendation"], "default": "search"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 10},
+                },
+                "required": ["keyword"],
+                "additionalProperties": False,
+            },
+            "argument_fields": ("keyword", "mode", "limit"),
+        },
         "promotion_analysis": {
             "description_zh": "基于用户上传的商家清单，查询推广前后商家、按商家统计媒体数量、媒体、链接、品类或历史表现；没有上传清单时不要调用。",
             "description_en": "Analyze merchant performance, count distinct active publishers per merchant, or inspect publisher, link, category, or history performance for an uploaded merchant list; do not call without an uploaded list.",
@@ -440,6 +460,17 @@ def validate_tool_arguments(tool_name: str, arguments: object) -> tuple[dict | N
             if error:
                 return None, error
             cleaned["view"] = view
+    elif tool_name == "keyword_search":
+        keyword, error = _string(arguments.get("keyword"), "keyword", 120)
+        if error or len(keyword or "") < 2:
+            return None, _error("invalid_arguments", "keyword")
+        mode, error = _enum(arguments.get("mode", "search"), "mode", ("search", "recommendation"))
+        if error:
+            return None, error
+        limit, error = _integer(arguments.get("limit", 10), "limit", 1, 20)
+        if error:
+            return None, error
+        cleaned.update({"keyword": keyword, "mode": mode, "limit": limit})
     elif tool_name == "promotion_analysis":
         cleaned, error = validate_promotion_arguments(arguments)
         if error:
@@ -601,6 +632,31 @@ def _valid_top_asins(data: dict) -> bool:
             and isinstance(merchant["name"], str) and bool(merchant["name"]))
 
 
+def _validate_keyword_data(data: dict) -> bool:
+    rows = data.get("rows")
+    if not isinstance(rows, list) or len(rows) > 20:
+        return False
+    if "partial" in data and not isinstance(data["partial"], bool):
+        return False
+    allowed = {"merchantId", "merchantName", "tier", "category", "matchedField", "matchedText", "rank", "ranked", "salesAmount", "orders", "aov", "affCommission", "conversionRate", "epc", "clicks"}
+    text_limits = {"merchantId": 80, "merchantName": 120, "tier": 40, "category": 120, "matchedField": 40, "matchedText": 80}
+    for row in rows:
+        if not isinstance(row, dict) or not row or any(key not in allowed for key in row):
+            return False
+        if not all(isinstance(row.get(key), str) and 0 < len(row[key]) <= maximum for key, maximum in text_limits.items() if key in row):
+            return False
+        if not isinstance(row.get("merchantId"), str) or not isinstance(row.get("merchantName"), str):
+            return False
+        if "ranked" in row and not isinstance(row["ranked"], bool):
+            return False
+        if "rank" in row and (not isinstance(row["rank"], int) or isinstance(row["rank"], bool) or not 1 <= row["rank"] <= 20):
+            return False
+        for key in ("salesAmount", "orders", "aov", "affCommission", "conversionRate", "epc", "clicks"):
+            if key in row and (isinstance(row[key], bool) or not isinstance(row[key], (int, float)) or not math.isfinite(row[key])):
+                return False
+    return True
+
+
 def validate_tool_result(tool_name: str, result: object) -> tuple[dict | None, dict | None]:
     if tool_name not in _SPECS:
         return None, _error("unsupported_tool", "toolName")
@@ -638,6 +694,8 @@ def validate_tool_result(tool_name: str, result: object) -> tuple[dict | None, d
         field_names = set(AGENT_RESULT_FIELDS[tool_name])
         if any(key not in field_names or key in _UNSAFE_KEYS for key in data):
             return None, _error("invalid_tool_result", "data")
+        if tool_name == "keyword_search" and not _validate_keyword_data(data):
+            return None, _error("invalid_tool_result", "data")
         if not _validate_json_value(data):
             return None, _error("invalid_tool_result", "data")
         if tool_name == "merchant_analysis" and ("topAsins" in data or "asinRanking" in data):
@@ -657,7 +715,7 @@ def validate_tool_result(tool_name: str, result: object) -> tuple[dict | None, d
 
     maximum = (
         AGENT_TIER_RESULT_MAX_BYTES
-        if tool_name in {"tier_analysis", "asin_analysis"}
+        if tool_name in {"tier_analysis", "asin_analysis", "keyword_search"}
         else AGENT_RESULT_MAX_BYTES
     )
     try:

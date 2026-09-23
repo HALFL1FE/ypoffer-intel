@@ -127,7 +127,7 @@ describe("AgentPage", () => {
     const wrapper = mount(AgentPage, { props: { language: "en", run, autoFocus: false } });
     const field = wrapper.get('[data-agent-input]');
     await field.setValue('/');
-    expect(wrapper.findAll('[role="option"]')).toHaveLength(11);
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(12);
     await field.setValue('/pub');
     expect(wrapper.findAll('[role="option"]')).toHaveLength(2);
     await field.trigger('keydown', { key: 'Enter', isComposing: true });
