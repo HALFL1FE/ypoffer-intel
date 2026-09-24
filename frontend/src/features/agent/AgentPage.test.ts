@@ -1,4 +1,4 @@
-import { flushPromises, mount } from "@vue/test-utils";
+import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -667,13 +667,56 @@ describe("AgentPage", () => {
     await wrapper.get('[data-agent-form]').trigger("submit");
     await flushPromises();
     await wrapper.get('[data-feedback-action="open"]').trigger("click");
-    await wrapper.get('[data-feedback-reason="inaccurate"]').setValue(true);
-    await wrapper.get('[data-feedback-form]').trigger("submit");
+    const dialog = new DOMWrapper(document.querySelector('[data-answer-feedback-dialog]')!);
+    await dialog.get('[data-feedback-reason="inaccurate"]').setValue(true);
+    await dialog.get('[data-feedback-form]').trigger("submit");
     await flushPromises();
     await wrapper.get('[data-agent-log="questions-csv"]').trigger("click");
 
     expect(feedback.submit).toHaveBeenCalledWith("inaccurate", "");
     expect(session.downloadLogs).toHaveBeenCalledWith("questions", "csv");
+  });
+
+  it("shows a separate dislike action under each completed Copilot Agent answer", async () => {
+    const previousRuntime = window.OI_MODERN_RUNTIME;
+    const submitFirst = vi.fn(async () => ({ ok: true as const }));
+    const submitSecond = vi.fn(async () => ({ ok: true as const }));
+    let count = 0;
+    window.OI_MODERN_RUNTIME = {
+      createAgentActivity: () => ({
+        begin: () => `answer-${++count}`,
+        finish: () => undefined,
+        clear: () => undefined,
+        feedbackForAnswer: (id: string) => id === "answer-1"
+          ? { isAvailable: () => true, submit: submitFirst }
+          : { isAvailable: () => true, submit: submitSecond }
+      })
+    } as never;
+    try {
+      const run = vi.fn<AgentRunner>()
+        .mockResolvedValueOnce({ ok: true, status: "done", response: "First answer", steps: [] })
+        .mockResolvedValueOnce({ ok: true, status: "done", response: "Second answer", steps: [] });
+      const wrapper = mount(AgentPage, { props: { language: "zh", run, autoFocus: false } });
+      for (const prompt of ["第一问", "第二问"]) {
+        await wrapper.get('[data-agent-input]').setValue(prompt);
+        await wrapper.get('[data-agent-form]').trigger("submit");
+        await flushPromises();
+      }
+      const answers = wrapper.findAll(".aw-message-assistant");
+      expect(answers).toHaveLength(2);
+      expect(answers.map((answer) => answer.get('[data-chatbot-action="feedback"]').text()))
+        .toEqual(["👎不满意该回复", "👎不满意该回复"]);
+      await answers[0]!.get('[data-chatbot-action="feedback"]').trigger("click");
+      const dialog = new DOMWrapper(document.querySelector('[data-answer-feedback-dialog]')!);
+      await dialog.get('[data-feedback-reason="unclear"]').setValue(true);
+      await dialog.get('[data-feedback-form]').trigger("submit");
+      await flushPromises();
+      expect(submitFirst).toHaveBeenCalledWith("unclear", "");
+      expect(submitSecond).not.toHaveBeenCalled();
+      wrapper.unmount();
+    } finally {
+      window.OI_MODERN_RUNTIME = previousRuntime;
+    }
   });
 
   it("aborts an active run and clears the conversation", async () => {

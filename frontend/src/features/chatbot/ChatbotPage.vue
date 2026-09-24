@@ -218,8 +218,10 @@ function feedbackForAnswer(answerId: string): ReturnType<NonNullable<ChatbotSess
   return props.session?.feedbackForAnswer?.(answerId) || null;
 }
 
-function feedbackForDeepWindow(windowId: string): ReturnType<NonNullable<ChatbotSession["feedbackForDeepWindow"]>> {
-  return props.session?.feedbackForDeepWindow?.(windowId) || null;
+function feedbackForDeepWindow(window: DeepWindowState): ReturnType<NonNullable<ChatbotSession["feedbackForDeepWindow"]>> {
+  const answerId = window.result.sessionResult?.answerId;
+  return (answerId ? feedbackForAnswer(answerId) : null)
+    || props.session?.feedbackForDeepWindow?.(window.id) || null;
 }
 
 function sessionResultToView(result: ChatbotSessionResult, query: string): ChatbotReportViewResult {
@@ -902,7 +904,7 @@ onBeforeUnmount(() => {
       :can-minimize="window.canMinimize"
       :can-close="window.canClose"
       :feedback-state="window.feedbackState"
-      :feedback="feedbackForDeepWindow(window.id)"
+      :feedback="feedbackForDeepWindow(window)"
       @activate="deepWindowController.activate(window.id)"
       @minimize="deepWindowController.minimize(window.id)"
       @restore="deepWindowController.restore(window.id)"

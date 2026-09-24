@@ -21,10 +21,11 @@ export interface ModernRuntimeHost {
   readonly setLanguage?: (language: UiLanguage) => void;
   readonly download?: (type: string, payload: unknown) => boolean;
   readonly createAgentActivity?: () => {
-    begin(prompt: string, language: UiLanguage): void;
+    begin(prompt: string, language: UiLanguage): string;
     finish(result: { ok: boolean; status: string; response: string }): void;
     clear(): void;
     feedback?: { isAvailable(): boolean; submit(reasonCode: string, reasonDetail?: string): Promise<{ ok: boolean; alreadyExists?: boolean; errorCode?: string }> };
+    feedbackForAnswer?(answerId: string): { isAvailable(): boolean; submit(reasonCode: string, reasonDetail?: string): Promise<{ ok: boolean; alreadyExists?: boolean; errorCode?: string }> } | null;
     downloadLogs?(kind: "questions" | "feedback", format: "csv" | "jsonl"): boolean;
   };
   readonly runAgentPublisher?: (request: {

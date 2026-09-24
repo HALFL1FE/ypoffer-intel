@@ -1240,25 +1240,26 @@ body:has([data-modern-root])[data-dash-theme="light"] :is(.insight-panel, .chat-
 
 .answer-feedback-backdrop {
   position: fixed;
-  z-index: 1400;
+  z-index: 10000;
   inset: 0;
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(13, 22, 38, .32);
-  backdrop-filter: blur(4px);
+  background: rgba(202, 215, 234, .48);
+  backdrop-filter: blur(9px);
 }
 
 .answer-feedback-dialog {
   position: relative;
-  width: min(420px, 100%);
-  max-height: min(680px, calc(100vh - 40px));
+  box-sizing: border-box;
+  width: min(475px, 100%);
+  max-height: min(760px, calc(100vh - 40px));
   overflow: auto;
-  padding: 22px;
-  border: 1px solid var(--line, light-dark(#dbe3eb, #40526b));
-  border-radius: 16px;
-  background: var(--panel, light-dark(#fff, #1a2638));
-  box-shadow: 0 24px 70px rgba(17, 43, 57, .25);
+  padding: 20px;
+  border: 1px solid light-dark(#dac9ff, #69558b);
+  border-radius: 24px;
+  background: light-dark(#fcfdff, #20283b);
+  box-shadow: 0 24px 70px rgba(71, 59, 127, .2), 0 0 0 1px rgba(178, 145, 255, .12);
 }
 
 .answer-feedback-close {
@@ -1285,55 +1286,91 @@ body:has([data-modern-root])[data-dash-theme="light"] :is(.insight-panel, .chat-
 }
 
 .answer-feedback-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   padding-right: 28px;
+}
+
+.answer-feedback-avatar {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid light-dark(#ffc6dc, #85536b);
+  border-radius: 14px;
+  background: light-dark(#fff0f5, #493247);
+  font-size: 19px;
+}
+
+.answer-feedback-heading-text {
+  display: grid;
+  gap: 3px;
 }
 
 .answer-feedback-heading strong {
   color: var(--ink, light-dark(#263450, #e2eaf6));
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .answer-feedback-heading span,
 .answer-feedback-dialog legend,
 .answer-feedback-detail > span {
   color: var(--muted, light-dark(#6f7f94, #a5b4c8));
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
 .answer-feedback-dialog form {
-  margin-top: 18px;
+  margin-top: 22px;
+  gap: 18px;
 }
 
 .answer-feedback-dialog fieldset {
   margin: 0;
   padding: 0;
   border: 0;
+  gap: 9px;
 }
 
 .answer-feedback-reason {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 8px 14px;
+  border: 1px solid light-dark(#dbe2ef, #48566d);
+  border-radius: 14px;
   color: var(--ink, light-dark(#263450, #e2eaf6));
-  font-size: 12px;
+  background: light-dark(#fbfcff, #253047);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.answer-feedback-reason:hover,
+.answer-feedback-reason:focus-within,
+.answer-feedback-reason:has(input:checked) {
+  border-color: #a987eb;
+  background: light-dark(#f8f4ff, #352b4e);
 }
 
 .answer-feedback-reason input {
-  accent-color: var(--nav-active, #1d6fd6);
+  accent-color: #7848d8;
 }
 
 .answer-feedback-detail textarea {
   box-sizing: border-box;
   width: 100%;
-  min-height: 74px;
-  padding: 9px 10px;
+  min-height: 96px;
+  padding: 12px;
   border: 1px solid var(--line, light-dark(#dbe3eb, #40526b));
-  border-radius: 9px;
+  border-radius: 14px;
   color: var(--ink, light-dark(#263450, #e2eaf6));
   background: var(--panel, light-dark(#fff, #1a2638));
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   resize: vertical;
 }
 
@@ -1356,22 +1393,23 @@ body:has([data-modern-root])[data-dash-theme="light"] :is(.insight-panel, .chat-
 }
 
 .answer-feedback-actions button {
-  min-height: 31px;
-  padding: 0 12px;
+  min-height: 37px;
+  padding: 0 16px;
   border: 1px solid var(--line, light-dark(#dbe3eb, #40526b));
-  border-radius: 8px;
+  border-radius: 999px;
   color: var(--ink, light-dark(#263450, #e2eaf6));
   background: var(--panel, light-dark(#fff, #1a2638));
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .answer-feedback-actions button[type="submit"] {
-  border-color: var(--nav-active, #1d6fd6);
+  border-color: #7848d8;
   color: #fff;
-  background: var(--nav-active, #1d6fd6);
+  background: #7848d8;
+  box-shadow: 0 5px 14px rgba(120, 72, 216, .25);
 }
 
 .answer-feedback-actions button:disabled {

@@ -30,7 +30,7 @@ const error = ref("");
 const dialog = ref<HTMLElement | null>(null);
 
 const copy = computed(() => props.language === "zh" ? {
-  title: "哪里需要改进？",
+  title: "哪里不满意？",
   subtitle: "请选择一个主要原因，也可以补充说明。",
   reason: "主要原因",
   detail: "补充说明（可选）",
@@ -48,7 +48,7 @@ const copy = computed(() => props.language === "zh" ? {
     other: "其他"
   }
 } : {
-  title: "What could be improved?",
+  title: "What was unsatisfactory?",
   subtitle: "Choose one main reason and optionally add details.",
   reason: "Main reason",
   detail: "Additional details (optional)",
@@ -155,12 +155,16 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleKeydown));
 </script>
 
 <template>
+  <Teleport to="body">
   <div v-if="open" class="answer-feedback-backdrop" data-answer-feedback-backdrop @click.self="close">
     <section ref="dialog" class="answer-feedback-dialog" data-answer-feedback-dialog role="dialog" aria-modal="true" :aria-label="copy.title">
       <button type="button" class="answer-feedback-close" data-feedback-action="close" :aria-label="language === 'zh' ? '关闭反馈窗口' : 'Close feedback dialog'" @click="close">×</button>
       <div class="answer-feedback-heading">
-        <strong>{{ copy.title }}</strong>
-        <span>{{ copy.subtitle }}</span>
+        <span class="answer-feedback-avatar" aria-hidden="true">👎</span>
+        <div class="answer-feedback-heading-text">
+          <strong>{{ copy.title }}</strong>
+          <span>{{ copy.subtitle }}</span>
+        </div>
       </div>
       <form data-feedback-form @submit.prevent="submit">
         <fieldset>
@@ -182,4 +186,5 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleKeydown));
       </form>
     </section>
   </div>
+  </Teleport>
 </template>
