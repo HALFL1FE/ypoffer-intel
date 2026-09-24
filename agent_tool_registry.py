@@ -10,6 +10,7 @@ import datetime as dt
 import json
 import math
 import re
+import unicodedata
 from typing import Any
 
 from agent_promotion_contract import (
@@ -89,7 +90,7 @@ AGENT_RESULT_FIELDS = {
         "source", "dataAsOf",
     ),
     "keyword_search": (
-        "keyword", "mode", "rows", "matchedCount", "returnedCount",
+        "keyword", "matchedKeyword", "matchType", "mode", "rows", "matchedCount", "returnedCount",
         "truncated", "unrankedCount", "headline", "note", "partial", "keywordCheckedAt",
     ),
     "promotion_analysis": tuple(PROMOTION_RESULT_FIELDS),
@@ -319,19 +320,20 @@ def _build_specs() -> dict[str, dict[str, Any]]:
             "argument_fields": ("asins", "view"),
         },
         "keyword_search": {
-            "description_zh": "按产品关键词查找匹配商户；用户明确要求品牌推荐时按命中商户的整体快照表现排序，不代表该产品销量。",
-            "description_en": "Find merchants matching a product keyword; for explicit brand recommendations, rank matched merchants by overall snapshot performance, not product sales.",
+            "description_zh": "按产品关键词查找匹配商户；原词无命中时可依次尝试最多三个语义相近候选词。推荐只按命中商户的整体快照表现排序，不代表该产品销量。",
+            "description_en": "Find merchants by product keyword; when the original has no matches, try up to three semantic alternatives in order. Recommendations rank matched merchants by overall snapshot performance, not product sales.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "keyword": _text_property("产品关键词，不包含推荐等意图词。", "Product keyword without recommendation intent words.", 120),
+                    "semanticAlternatives": {"type": "array", "items": {"type": "string", "minLength": 2, "maxLength": 120}, "minItems": 1, "maxItems": 3},
                     "mode": {"type": "string", "enum": ["search", "recommendation"], "default": "search"},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 10},
                 },
                 "required": ["keyword"],
                 "additionalProperties": False,
             },
-            "argument_fields": ("keyword", "mode", "limit"),
+            "argument_fields": ("keyword", "semanticAlternatives", "mode", "limit"),
         },
         "promotion_analysis": {
             "description_zh": "基于用户上传的商家清单，查询推广前后商家、按商家统计媒体数量、媒体、链接、品类或历史表现；没有上传清单时不要调用。",
@@ -471,6 +473,11 @@ def validate_tool_arguments(tool_name: str, arguments: object) -> tuple[dict | N
         if error:
             return None, error
         cleaned.update({"keyword": keyword, "mode": mode, "limit": limit})
+        if "semanticAlternatives" in arguments:
+            alternatives, error = _string_array(arguments["semanticAlternatives"], "semanticAlternatives", 1, 3, 120)
+            if error or any(len(item) < 2 for item in alternatives or []):
+                return None, _error("invalid_arguments", "semanticAlternatives")
+            cleaned["semanticAlternatives"] = alternatives
     elif tool_name == "promotion_analysis":
         cleaned, error = validate_promotion_arguments(arguments)
         if error:
@@ -632,12 +639,29 @@ def _valid_top_asins(data: dict) -> bool:
             and isinstance(merchant["name"], str) and bool(merchant["name"]))
 
 
+def _normalize_keyword(value: str) -> str:
+    folded = unicodedata.normalize("NFKD", value.lower().replace("&", " and "))
+    without_marks = "".join(char for char in folded if not unicodedata.combining(char))
+    return " ".join(re.findall(r"[a-z0-9\u4e00-\u9fff]+", without_marks))
+
+
 def _validate_keyword_data(data: dict) -> bool:
     rows = data.get("rows")
     if not isinstance(rows, list) or len(rows) > 20:
         return False
     if "partial" in data and not isinstance(data["partial"], bool):
         return False
+    if "matchedKeyword" in data and (not isinstance(data["matchedKeyword"], str) or not 2 <= len(data["matchedKeyword"]) <= 120):
+        return False
+    if "matchType" in data and (data["matchType"] not in ("exact", "semantic") or "matchedKeyword" not in data):
+        return False
+    if "matchType" in data:
+        keyword = data.get("keyword")
+        if not isinstance(keyword, str) or not 2 <= len(keyword) <= 120:
+            return False
+        same_keyword = _normalize_keyword(keyword) == _normalize_keyword(data["matchedKeyword"])
+        if (data["matchType"] == "exact") != same_keyword or (data["matchType"] == "semantic" and not rows):
+            return False
     allowed = {"merchantId", "merchantName", "tier", "category", "matchedField", "matchedText", "rank", "ranked", "salesAmount", "orders", "aov", "affCommission", "conversionRate", "epc", "clicks"}
     text_limits = {"merchantId": 80, "merchantName": 120, "tier": 40, "category": 120, "matchedField": 40, "matchedText": 80}
     for row in rows:

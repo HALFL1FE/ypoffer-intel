@@ -450,9 +450,15 @@ function queryWithDefaults(prompt: string, language: QueryContext["language"], i
   if (intent === "category" && !categories.length && params.recommendCategories !== true) issues.push(language === "zh" ? "请提供品类目标。" : "Provide a category target.");
   const includeTier4 = params.includeTier4 === true || tiers.includes("Tier 4");
   const includeBlack = params.includeBlack === true || tiers.includes("BLACK TIER");
-  const keyword = text(params.keywordSearch || params.keyword)
-    || (intent === "keyword" && commandTarget !== undefined ? commandTarget : "")
+  const keyword = (intent === "keyword" && commandTarget !== undefined ? commandTarget : "")
+    || text(params.keywordSearch || params.keyword)
     || undefined;
+  const commandKeywordOverridesClassifier = intent === "keyword" && commandTarget !== undefined
+    && normalizeChatbotText(commandTarget) !== normalizeChatbotText(params.keywordSearch || params.keyword);
+  const semanticAlternatives = !commandKeywordOverridesClassifier && Array.isArray(params.semanticAlternatives)
+    ? unique(params.semanticAlternatives.filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim()).filter((value) => value.length >= 2 && value.length <= 120)).slice(0, 3)
+    : [];
   const lookupText = intent === "merchant" && !merchantIds.length && !merchantNames.length
     ? merchantPrompt.replace(/^\s*\/?merchant\s*[:：]?\s*/i, "").trim()
     : "";
@@ -474,6 +480,7 @@ function queryWithDefaults(prompt: string, language: QueryContext["language"], i
     categories,
     tiers,
     ...(keyword ? { keyword } : {}),
+    ...(intent === "keyword" && semanticAlternatives.length ? { semanticAlternatives } : {}),
     ...(count ? { count } : {}),
     metricFilters: filters,
     metricSort: parseMetricSort(params) || naturalMetricSort(parsePrompt),
@@ -543,8 +550,19 @@ export function resolveReportQuery(prompt: string, context: QueryContext): Repor
   }
   const rule = ruleIntent(input);
   const explicitStrong = explicit.intent === "payment" || explicit.intent === "analysis" || explicit.intent === "recommendation" || explicit.intent === "publisher" || explicit.intent === "publisherprofile" || explicit.intent === "keyword" || explicit.intent === "help";
-  const naturalStrong = rule === "payment" || rule === "analysis" || rule === "publisher" || rule === "publisherprofile" || rule === "help";
-  const intent = explicit.intent || (explicitStrong || naturalStrong ? rule : classification.intent || rule);
+  const naturalStrong = rule === "payment" || rule === "analysis" || rule === "keyword" || rule === "publisher" || rule === "publisherprofile" || rule === "help";
+  const classifiedKeyword = text(classification.params.keywordSearch || classification.params.keyword);
+  const bareLookupTarget = input.match(/^\s*(?:查询|搜索|查找|search(?:\s+for)?|find)\s*(.+?)\s*[?？]?\s*$/i)?.[1]?.trim() || "";
+  const normalizedLookup = normalizeChatbotText(bareLookupTarget);
+  const knownMerchant = context.merchantCandidates?.some((candidate) =>
+    normalizeChatbotText(candidate.id) === normalizedLookup || normalizeChatbotText(candidate.name) === normalizedLookup) || false;
+  const productLookup = rule === "merchant" && Boolean(bareLookupTarget) && !knownMerchant
+    && !context.categories.some((category) => normalizeChatbotText(category) === normalizedLookup)
+    && !/^\d{5,13}$|^B[0-9A-Z]{9}$/i.test(bareLookupTarget)
+    && !text(classification.params.merchantName || classification.params.merchantId);
+  const mistakenRecommendation = classification.intent === "recommendation" && Boolean(classifiedKeyword)
+    && !/recommend|recommendation|top\s*\d+|best|排行|排名|推荐|优先|选品|前\s*\d+/i.test(input);
+  const intent = explicit.intent || (explicitStrong || naturalStrong ? rule : productLookup || mistakenRecommendation ? "keyword" : classification.intent || rule);
   const parsedBy: ReportQuery["parsedBy"] = explicit.command ? "command" : classification.intent && intent === classification.intent ? "llm" : "rule";
   const params = classification.params;
   const categoryCandidate = resolveChatbotCategory(input, context.categories);
@@ -561,7 +579,9 @@ export function resolveReportQuery(prompt: string, context: QueryContext): Repor
     return { ...query, publisherQuery: query.merchantNames[0] || query.merchantIds[0] || "" };
   }
   if (intent === "keyword" && !query.keyword) {
-    const stripped = input.replace(/^\/?keywords?\s*[:：]?/i, "").replace(/关键词|product\s*(?:name|title)/i, "").trim();
+    const stripped = input.replace(/^\/?keywords?\s*[:：]?/i, "")
+      .replace(/^(?:查询|搜索|查找|search(?:\s+for)?|find)\s*/i, "")
+      .replace(/关键词|product\s*(?:name|title)/i, "").trim();
     return { ...query, keyword: stripped || undefined, resolution: stripped ? query.resolution : "needs_input", issues: stripped ? query.issues : [context.language === "zh" ? "请提供关键词。" : "Provide a keyword."] };
   }
   if (intent === "asin" && !query.asins.length && /asin|商品编号/i.test(lower)) {

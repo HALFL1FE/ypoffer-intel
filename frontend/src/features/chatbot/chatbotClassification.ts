@@ -5,7 +5,7 @@ export interface ChatbotClassification {
   readonly params: Readonly<Record<string, unknown>>;
 }
 
-const INTENTS: readonly string[] = ["asin", "merchant", "category", "tier", "recommendation", "payment", "analysis"];
+const INTENTS: readonly string[] = ["asin", "merchant", "keyword", "category", "tier", "recommendation", "payment", "analysis"];
 
 export function normalizeChatbotClassification(value: unknown): ChatbotClassification | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;

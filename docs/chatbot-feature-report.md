@@ -18,6 +18,8 @@
 
 > **2026-09-08 PR #189 审查修复：** Vue Report Mode 现在消费 `/api/chat/classify` 返回的有效 `intent` 和查询参数，分类失败或无效时使用本地规则；分类期间停止会阻止后续分析。`public/auth.js` 延迟获取关键词后调用 `OI_MODERN_APP.updateProductKeywords()`，已创建的 Chatbot session 在查询时读取最新快照，并仅按 Merchant ID 合并产品标题、关键词及 ASIN，不覆盖指标或清空会话。Chatbot 的媒体记录和媒体画像命令尚未接入完整数据通路，已从默认菜单隐藏；独立 Publishers 页面不受影响。此说明优先于下文历史迁移章节中的功能对齐描述。
 
+> **关键词查询对齐（2026-09-24）：** 分类器新增 `keyword` 意图与 `keywordSearch`、`semanticAlternatives` 参数。Report Mode 对普通产品词查询走关键词报告；若分类器把不含推荐措辞的产品词误判为推荐，则按关键词处理。原词的本地及远程精确查询均无命中后，才按候选词顺序在现有目录中验证，报告标明实际匹配词；Agent 关键词工具复用相同的原词优先匹配逻辑。候选词命中只代表商户搜索字段相关，不代表该产品的 ASIN 销量。
+
 > **Agent 查询命令优化（2026-09-15）：** Agent 命令菜单展示 11 个高频入口；`/merchants`、`/unpaid`、`/revenue`、`/epc`、`/orders` 作为隐藏的历史别名继续兼容解析。`/publisher` 与 `/publisherprofile` 通过 `OI_MODERN_RUNTIME.runAgentPublisher` 复用 Report 数据提供器和结构化渲染，`/promotion` 在上传推广清单后进入 `promotion_analysis`，未上传时在页面直接提示。此说明更新并取代上文关于媒体命令未接入的状态描述。
 
 ## 1. 概述

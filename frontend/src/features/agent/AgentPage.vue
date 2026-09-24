@@ -5,7 +5,7 @@ import type { UiLanguage } from "../../shared/i18n";
 import { renderMarkdownToHtml } from "../../shared/markdown/markdown";
 import type { AgentResultView as AgentResultViewModel } from "../../shared/contracts/agentResult";
 import { normalizeAgentResultViews } from "../../shared/contracts/agentResult";
-import FeedbackForm from "../chatbot/FeedbackForm.vue";
+import ChatAnswerActions from "../chatbot/ChatAnswerActions.vue";
 import ChatbotCommandMenu from "../chatbot/ChatbotCommandMenu.vue";
 import ChatbotResultView from "../chatbot/ChatbotResultView.vue";
 import type { ChatbotReportViewResult } from "../chatbot/chatbotViewTypes";
@@ -89,7 +89,7 @@ const readFile = props.readFile || readMerchantWorkbook;
 const attachment = ref<AgentPromotionAttachment | null>(attachmentStore.get());
 
 const input = ref("");
-const messages = ref<Array<{ readonly id: string; readonly role: "user" | "assistant"; readonly content: string; readonly resultViews?: readonly AgentResultViewModel[]; readonly report?: ChatbotReportViewResult }>>([]);
+const messages = ref<Array<{ readonly id: string; readonly role: "user" | "assistant"; readonly content: string; readonly resultViews?: readonly AgentResultViewModel[]; readonly report?: ChatbotReportViewResult; readonly feedbackState?: "available" | "submitted" }>>([]);
 const timeline = ref<AgentTimelineStep[]>([]);
 const runElapsedMs = ref(0);
 const runStatus = ref<AgentRunStatus>("idle");
@@ -116,6 +116,16 @@ const localSessionOverride = ref(false);
 let lastScrollTop = 0;
 const activity = window.OI_MODERN_RUNTIME?.createAgentActivity?.();
 const feedback = computed(() => !localSessionOverride.value && props.session ? props.session.feedback : activity?.feedback);
+let activeAnswerId = "";
+function feedbackForMessage(id: string) {
+  const latestAnswerId = messages.value.slice().reverse().find((message) => message.role === "assistant")?.id;
+  if (props.session && !localSessionOverride.value) {
+    return props.session.feedbackForAnswer?.(id)
+      || (latestAnswerId === id ? props.session.feedback : null);
+  }
+  return activity?.feedbackForAnswer?.(id)
+    || (latestAnswerId === id ? feedback.value : null);
+}
 const hasLogDownloads = computed(() => Boolean(props.session?.downloadLogs || activity?.downloadLogs));
 const followingLatest = ref(true);
 const stopping = ref(false);
@@ -492,10 +502,10 @@ function syncSessionState(next: AgentSessionState = props.session!.getState()): 
   error.value = next.status === "error" ? copy.value.failed : "";
   const sessionMessages = next.messages || next.history;
   messages.value = sessionMessages.map((message, index) => {
-    const id = `session-${index}-${message.role}`;
+    const id = message.answerId || `session-${index}-${message.role}`;
     const previous = messages.value.find((item) => item.id === id && item.content === message.content);
     const current = next.status === 'done' && index === sessionMessages.length - 1 && message.role === 'assistant';
-    return { id, role: message.role, content: message.content, resultViews: current && resultViews.value.length ? resultViews.value.slice() : previous?.resultViews };
+    return { id, role: message.role, content: message.content, resultViews: current && resultViews.value.length ? resultViews.value.slice() : previous?.resultViews, feedbackState: message.feedbackState };
   });
   if (next.status === 'done' && messages.value.at(-1)?.resultViews?.length) resultViews.value = [];
   if (next.memory && typeof next.memory === "object") memory.value = normalizeAgentMemory(next.memory);
@@ -616,7 +626,7 @@ async function submit(): Promise<void> {
   startElapsedTimer();
   feedbackRefreshKey.value += 1;
   abortController = new AbortController();
-  activity?.begin(prompt, requestLanguage);
+  activeAnswerId = activity?.begin(prompt, requestLanguage) || "";
   try {
     const request: AgentRunRequest = {
       prompt: requestPrompt,
@@ -654,7 +664,7 @@ async function submit(): Promise<void> {
     response.value = result.response || (result.status === "stopped" ? copy.value.stopped : "");
     if (result.resultViews?.length) resultViews.value = normalizeAgentResultViews(result.resultViews);
     if (result.status === "done" && result.ok && result.response) {
-      messages.value = [...messages.value, { id: nextId("assistant"), role: "assistant", content: result.response, resultViews: resultViews.value.slice(), report: result.report }];
+      messages.value = [...messages.value, { id: activeAnswerId || nextId("assistant"), role: "assistant", content: result.response, resultViews: resultViews.value.slice(), report: result.report }];
       resultViews.value = [];
     }
     if (result.status !== "done" || !result.ok) {
@@ -863,6 +873,7 @@ onBeforeUnmount(() => {
               <section v-if="message.resultViews?.length" class="agent-modern-results" :aria-label="copy.results">
                 <div v-for="(view, index) in message.resultViews" :id="`${workspaceId}-${message.id}-${index}`" :key="view.id" class="aw-result-anchor"><AgentResultView :language="language" :view="view" /></div>
               </section>
+              <ChatAnswerActions v-if="message.role === 'assistant' && feedbackForMessage(message.id)" :language="language" :answer-id="message.id" :feedback-state="message.feedbackState || 'available'" :feedback="feedbackForMessage(message.id)" />
             </article>
 
             <div v-if="runStatus === 'running'" class="aw-progress" data-agent-progress role="status" aria-live="polite">
@@ -878,7 +889,6 @@ onBeforeUnmount(() => {
               <div v-for="(view, index) in resultViews" :id="`${workspaceId}-current-${index}`" :key="view.id" class="aw-result-anchor"><AgentResultView :language="language" :view="view" /></div>
             </section>
             <AgentTimeline v-if="timeline.length || runStatus !== 'idle'" :language="language" :status="runStatus" :steps="timeline" :elapsed-ms="runElapsedMs" :partial="partial" :omitted-targets="omittedTargets" />
-            <FeedbackForm :language="language" :feedback="feedback" :refresh-key="feedbackRefreshKey" />
             <div v-if="error || runStatus === 'stopped'" class="aw-notice" :class="{ 'aw-notice-error': error }" :role="error ? 'alert' : 'status'">
               <p>{{ error || copy.stopped }}</p><button v-if="lastPrompt" type="button" class="aw-button" data-agent-action="retry" @click="handleExample(lastPrompt)">{{ copy.retry }}</button>
             </div>

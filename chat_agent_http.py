@@ -42,7 +42,7 @@ PLANNING_PROMPT_ZH = (
     "8. 付款月份未写年份时按当前年份理解，不要根据历史数据猜年份；只有用户明确写出历史年份时才使用历史月份。不要编造数值；工具结果中的数值是最终值，直接引用。"
     "\nTop ASIN 提取不是商家对比或趋势查询，即使列出六个商家也分别提取，不用 merchant_comparison。只支持当前快照每家最多五个；其他日期或更多数量需明确说明未覆盖。"
     "\n9. 只有请求包含已确认的上传清单摘要时才调用 promotion_analysis；file 视图只回答文件事实，其他视图必须使用摘要中的商家范围和日期。按商家统计媒体数量、询问哪些商家有更多媒体、媒体数量排名时，使用 view=merchant_media，并按用户要求设置 limit（例如前10个使用 limit=10）。不要把成交 ASIN 当成推广目标 ASIN。"
-    "\n10. 产品词查询及 brand recommendation（例如 vacuum cleaner brand recommendation）必须调用 keyword_search；提取产品词作为 keyword，去掉推荐等意图词。明确要求推荐/Top/排名时 mode=recommendation，否则 mode=search。不要把产品词直接当商户名或品类；无法确定产品词时先请用户补充。"
+    "\n10. 产品词查询及 brand recommendation（例如 vacuum cleaner brand recommendation）必须调用 keyword_search；保留原始产品词作为 keyword，去掉推荐等意图词。可提供按语义接近程度排序的 semanticAlternatives（最多 3 个），原词未命中时才逐个验证；不要把近似命中说成精确命中。明确要求推荐/Top/排名时 mode=recommendation，否则 mode=search。不要把产品词直接当商户名或品类；无法确定产品词时先请用户补充。"
 )
 
 PLANNING_PROMPT_EN = (
@@ -60,7 +60,7 @@ PLANNING_PROMPT_EN = (
     "8. When a payment month has no year, use the current calendar year rather than guessing from historical rows; use a historical year only when the user explicitly says so. Never invent numbers; values in tool results are final, quote them."
     "\nTop ASIN extraction is not merchant comparison or a trend: query each listed merchant, including lists of six, without merchant_comparison. Only the current snapshot and up to five ASINs per merchant are supported; disclose uncovered dates or larger counts."
     "\n9. Call promotion_analysis only when the request includes a confirmed uploaded-list summary; use file for file facts and use the summary's merchant scope and date for other views. For per-merchant publisher counts or questions about which merchants have more publishers, use view=merchant_media and set limit from the request (for example, top 10 means limit=10). Never treat a purchased ASIN as a promotion target ASIN."
-    "\n10. For product-keyword queries or a brand recommendation such as vacuum cleaner brand recommendation, call keyword_search. Extract only the product phrase as keyword. Use mode=recommendation for explicit recommendations, Top, or ranking; otherwise use mode=search. Do not treat a product phrase as a merchant or category. Ask for a keyword if the product phrase is unclear."
+    "\n10. For product-keyword queries or a brand recommendation such as vacuum cleaner brand recommendation, call keyword_search. Preserve the original product phrase as keyword. Provide up to three semanticAlternatives in descending similarity; try them only when the original has no matches and verify catalog hits. Never call an approximate match exact. Use mode=recommendation for explicit recommendations, Top, or ranking; otherwise use mode=search. Do not treat a product phrase as a merchant or category. Ask for a keyword if the product phrase is unclear."
 )
 
 SYNTHESIS_PROMPT_ZH = (
@@ -75,7 +75,7 @@ SYNTHESIS_PROMPT_ZH = (
     "tier_analysis 结果中的 merchants 是按 Report Mode Tier 查询排序的当前商户页；必须展示用户要求的商户列表和关键指标，并结合 merchantList 的 total/offset/returned/hasMore 说明列表是否完整。hasMore 为 true 时不能声称已经列出全部商户。\n"
     "工具结果中的数值是计算好的最终值，直接引用，不要重新计算或外推新排名。\n"
     "某个工具失败时，如实说明该部分数据缺失，不得编造。promotion_analysis 的 evidenceOrigin=file 代表上传清单事实，evidenceOrigin=database 代表推广追踪查询；merchant_media 的 rows 是按商家去重后的媒体数量，直接按返回顺序说明排名；不要把观察到的变化表述为推送因果。"
-    " keyword_search 的 rows 是关键词匹配商家，不是关键词商品的 ASIN 销量；mode=recommendation 仅按命中商家的整体快照表现排序。展示 Merchant ID、命中依据、实际排序指标和数据时间；truncated 为 true 时说明结果只展示前几条，缺少指标的商家不得写成零表现。"
+    " keyword_search 的 rows 是关键词匹配商家，不是关键词商品的 ASIN 销量；mode=recommendation 仅按命中商家的整体快照表现排序。matchType=semantic 时说明原词无命中、实际查询词是 matchedKeyword，不要称作原词精确命中。展示 Merchant ID、命中依据、实际排序指标和数据时间；truncated 为 true 时说明结果只展示前几条，缺少指标的商家不得写成零表现。"
 )
 
 SYNTHESIS_PROMPT_EN = (
@@ -90,7 +90,7 @@ SYNTHESIS_PROMPT_EN = (
     "In tier_analysis results, merchants is the current merchant page ordered like the Report Mode Tier query; show the requested merchant list and key metrics, and use merchantList total/offset/returned/hasMore to state whether the page is complete. Never claim the full Tier list when hasMore is true.\n"
     "Values in tool results are final computed values; quote them and do not recompute or extrapolate new rankings.\n"
     "When a tool failed, state plainly that this part of the data is missing; do not fabricate. In promotion_analysis, evidenceOrigin=file means uploaded-list facts and evidenceOrigin=database means promotion-tracking data; merchant_media rows are per-merchant distinct media counts and should be reported in returned ranking order; do not describe observed changes as campaign causality."
-    " keyword_search rows are keyword-matched merchants, not ASIN sales for that product phrase. mode=recommendation ranks only matched merchants by overall snapshot performance. Show Merchant ID, match evidence, actual ranking metrics, and data time; if truncated is true, say only the first results are shown. Do not turn missing metrics into zero performance."
+    " keyword_search rows are keyword-matched merchants, not ASIN sales for that product phrase. mode=recommendation ranks only matched merchants by overall snapshot performance. When matchType=semantic, say the original had no matches and identify matchedKeyword as the actual search term; never call it an exact original match. Show Merchant ID, match evidence, actual ranking metrics, and data time; if truncated is true, say only the first results are shown. Do not turn missing metrics into zero performance."
 )
 
 

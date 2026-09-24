@@ -54,6 +54,8 @@ export interface AgentKeywordMatch {
 
 export interface AgentKeywordResult {
   readonly keyword: string;
+  readonly matchedKeyword: string;
+  readonly matchType: "exact" | "semantic";
   readonly mode: "search" | "recommendation";
   readonly rows: readonly AgentKeywordMatch[];
   readonly matchedCount: number;
@@ -72,10 +74,13 @@ export function searchAgentKeywords(
   offers: readonly ReportRow[],
   productKeywords: unknown,
   language: UiLanguage,
-  partial: boolean
+  partial: boolean,
+  semanticAlternatives: readonly string[] = []
 ): AgentKeywordResult {
   const query = resolveReportQuery(`/keyword: ${keyword}`, { language, categories: [] });
-  const report = buildEntityReport(query, offers, productKeywords, language);
+  const report = buildEntityReport({ ...query, semanticAlternatives }, offers, productKeywords, language);
+  const matchedKeyword = report.matchedKeyword || keyword;
+  const semantic = normalizeChatbotText(matchedKeyword) !== normalizeChatbotText(keyword);
   const offerById = new Map(offers.map((row) => [rowMerchantId(row), row]));
   const matches = report.rows.flatMap((row) => {
     const merchantId = rowMerchantId(row);
@@ -97,7 +102,7 @@ export function searchAgentKeywords(
       merchantId: merchantId.slice(0, 80), merchantName: merchantName.slice(0, 120),
       ...(typeof row.tier === "string" && row.tier ? { tier: row.tier.slice(0, 40) } : {}),
       ...(typeof row.category === "string" && row.category ? { category: row.category.slice(0, 120) } : {}),
-      ...evidence(row, keyword),
+      ...evidence(row, matchedKeyword),
       ...(mode === "recommendation" ? { ranked } : {}),
       ...(salesAmount !== undefined ? { salesAmount } : {}),
       ...(orders !== undefined ? { orders } : {}),
@@ -121,9 +126,10 @@ export function searchAgentKeywords(
     : item.match);
   const unrankedCount = mode === "recommendation" ? matches.filter((item) => !item.ranked).length : 0;
   const headline = language === "zh"
-    ? `${keyword} ${mode === "recommendation" ? "匹配商家推荐" : "关键词匹配商家"}`
-    : `${keyword} ${mode === "recommendation" ? "matched merchant recommendations" : "keyword matches"}`;
+    ? `${keyword}${semantic ? ` → ${matchedKeyword}` : ""} ${mode === "recommendation" ? "匹配商家推荐" : "关键词匹配商家"}`
+    : `${keyword}${semantic ? ` → ${matchedKeyword}` : ""} ${mode === "recommendation" ? "matched merchant recommendations" : "keyword matches"}`;
   const notes = [
+    ...(semantic && report.note ? [report.note] : []),
     mode === "recommendation"
       ? (language === "zh" ? "按命中商家的整体快照表现排序，不代表该关键词商品销量。" : "Ranked by matched merchants' overall snapshot performance, not product sales.")
       : (language === "zh" ? "按产品关键词及商户搜索字段匹配，未按表现排序。" : "Matched search fields; not ranked by performance."),
@@ -132,5 +138,5 @@ export function searchAgentKeywords(
     ...(partial ? [language === "zh" ? "关键词目录不可用，当前匹配可能不完整。" : "Keyword catalog unavailable; matches may be incomplete."] : []),
     ...(report.status === "needs_input" && report.note ? [report.note] : [])
   ];
-  return { keyword, mode, rows, matchedCount: matches.length, returnedCount: rows.length, truncated: matches.length > limit, unrankedCount, headline, note: notes.join(" "), partial };
+  return { keyword, matchedKeyword, matchType: semantic ? "semantic" : "exact", mode, rows, matchedCount: matches.length, returnedCount: rows.length, truncated: matches.length > limit, unrankedCount, headline, note: notes.join(" "), partial };
 }

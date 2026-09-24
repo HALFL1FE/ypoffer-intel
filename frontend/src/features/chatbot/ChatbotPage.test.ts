@@ -1,4 +1,4 @@
-import { flushPromises, mount } from "@vue/test-utils";
+import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import { describe, expect, it, vi } from "vitest";
 
@@ -307,6 +307,35 @@ describe("ChatbotPage", () => {
     expect(wrapper.findAll('[data-deep-window]')).toHaveLength(1);
     expect(wrapper.get('[data-deep-window]').attributes("data-status")).toBe("content");
     expect(wrapper.get('[data-deep-window-content]').text()).toContain("Shokz report ready");
+    wrapper.unmount();
+  });
+
+  it("lets a completed Report Deep Window submit feedback for its own answer", async () => {
+    const feedback = { isAvailable: () => true, submit: vi.fn(async () => ({ ok: true as const })) };
+    const result: ChatbotSessionResult = {
+      ok: true, status: "success", mode: "report", source: "cache", response: "Tier 2 report",
+      answerId: "tier-2-answer", feedbackState: "available"
+    };
+    const session = {
+      getState: () => ({ mode: "report" as const, language: "zh" as const, hasMemory: false,
+        source: "cache" as const, status: "idle" as const, history: [], messages: [], memory: [], currentResult: null }),
+      setMode: vi.fn(), submit: vi.fn(async () => result), onChange: vi.fn(() => () => undefined),
+      removeMemory: vi.fn(), clearConversation: vi.fn(),
+      feedbackForAnswer: vi.fn((id: string) => id === result.answerId ? feedback : null),
+      feedbackForDeepWindow: vi.fn(() => null)
+    };
+    const wrapper = mount(ChatbotPage, { props: { language: "zh", offers, session, autoFocus: false } });
+    await wrapper.get('[data-chatbot-report-input]').setValue("Tier 2");
+    await wrapper.get('[data-chatbot-report-form]').trigger("submit");
+    await flushPromises();
+
+    const window = wrapper.get('[data-deep-window]');
+    await window.get('[data-chatbot-action="feedback"]').trigger("click");
+    const dialog = new DOMWrapper(document.querySelector('[data-answer-feedback-dialog]')!);
+    await dialog.get('[data-feedback-reason="inaccurate"]').setValue(true);
+    await dialog.get('[data-feedback-form]').trigger("submit");
+    await flushPromises();
+    expect(feedback.submit).toHaveBeenCalledWith("inaccurate", "");
     wrapper.unmount();
   });
 

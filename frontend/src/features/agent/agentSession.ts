@@ -65,6 +65,8 @@ export const AGENT_TOOL_NAMES: readonly ToolName[] = [
 export interface AgentHistoryMessage {
   readonly role: "user" | "assistant";
   readonly content: string;
+  readonly answerId?: string;
+  readonly feedbackState?: "available" | "submitted";
 }
 
 import { asinContextFromViews } from "./agentAsinContext";
@@ -151,6 +153,7 @@ export interface AgentViewSession {
   newConversation(): void;
   onChange(listener: (state: AgentSessionState) => void): () => void;
   feedback?: AgentFeedback;
+  feedbackForAnswer?: (answerId: string) => AgentFeedback | null;
   downloadLogs?: (kind: "questions" | "feedback", format: "csv" | "jsonl") => boolean;
   dispose?: () => void;
 }
@@ -222,6 +225,7 @@ interface QuestionContext {
   recordPromise: Promise<{ readonly recordId: string } | null>;
   completionPromise?: Promise<{ readonly recordId: string } | null>;
   feedbackEventId?: string;
+  submitted?: boolean;
 }
 
 interface TraceContext {
@@ -798,6 +802,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
   let disposed = false;
   let activeCallbacks: AgentSessionCallbacks | null = null;
   let currentQuestion: QuestionContext | null = null;
+  const answerContexts = new Map<string, QuestionContext>();
   let lastResultOk = false;
   let traceQueue: Promise<void> = Promise.resolve();
 
@@ -1448,8 +1453,11 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     const keyword = typeof args.keyword === "string" ? args.keyword.trim() : "";
     const mode = args.mode === undefined ? "search" : args.mode;
     const limit = args.limit === undefined ? 10 : args.limit;
+    const alternatives = args.semanticAlternatives === undefined ? [] : args.semanticAlternatives;
     if (keyword.length < 2 || keyword.length > 120 || (mode !== "search" && mode !== "recommendation")
-      || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 20) {
+      || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 20
+      || !Array.isArray(alternatives) || alternatives.length > 3
+      || alternatives.some((value) => typeof value !== "string" || value.trim().length < 2 || value.trim().length > 120)) {
       return failure("invalid_arguments", "unavailable", { status: "invalid_filter", field: "keyword" });
     }
     const provider = createReportDataProvider({
@@ -1478,7 +1486,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     if (keywordUnavailable && !offerRows.length) {
       return failure("tool_error", "unavailable", { status: "unavailable", field: "keywords" });
     }
-    const data = searchAgentKeywords(keyword, mode, Number(limit), offerRows, keywordUnavailable ? {} : productKeywords, currentLanguage, keywordUnavailable);
+    const data = searchAgentKeywords(keyword, mode, Number(limit), offerRows, keywordUnavailable ? {} : productKeywords, currentLanguage, keywordUnavailable, alternatives);
     const source = provider.snapshot();
     const dataSource: DataSource = source.offersLoadedFrom === "db" ? "mixed" : "cache";
     const rawCheckedAt = isRecord(productKeywords) && typeof productKeywords.checkedAt === "string" ? productKeywords.checkedAt : "";
@@ -1987,9 +1995,18 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     errorCode = resultErrorCode || null;
     lastResultOk = Boolean(response);
     status = "done";
+    setQuestionAnswer(response);
     if (response) {
-      history = [...baseHistory, { role: "user" as const, content: prompt }, { role: "assistant" as const, content: response }].slice(-MAX_HISTORY);
+      history = [...baseHistory, { role: "user" as const, content: prompt }, {
+        role: "assistant" as const,
+        content: response,
+        ...(currentQuestion ? { answerId: currentQuestion.eventId, feedbackState: "available" as const } : {})
+      }].slice(-MAX_HISTORY);
       messages = history.slice();
+      if (currentQuestion) {
+        answerContexts.set(currentQuestion.eventId, currentQuestion);
+        while (answerContexts.size > 50) answerContexts.delete(answerContexts.keys().next().value!);
+      }
       if (events.length) {
         memory = applyAgentMemoryEvents(memory, events, Date.now());
         saveAgentMemory(storage, memory);
@@ -1997,7 +2014,6 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     } else {
       messages = baseHistory.slice();
     }
-    setQuestionAnswer(response);
     notify();
     return {
       ok: Boolean(response),
@@ -2232,40 +2248,61 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     }
   }
 
-  const feedback: AgentFeedback = {
-    isAvailable: () => Boolean(currentQuestion?.answer.trim() && lastResultOk),
-    async submit(reasonCode: string, reasonDetail = ""): Promise<AgentFeedbackResult> {
-      const question = currentQuestion;
-      const allowed = ["inaccurate", "not_answered", "incomplete_data", "unclear", "other"];
-      if (!question || !question.answer.trim() || !lastResultOk) return { ok: false, errorCode: "feedback_unavailable" };
-      if (!allowed.includes(reasonCode)) return { ok: false, errorCode: "invalid_reason" };
-      const record = await completeQuestion("success");
-      if (!record || options.enableQuestionLogging === false) return { ok: false, errorCode: "question_log_unavailable" };
-      const feedbackEventId = question.feedbackEventId || randomUuid();
-      currentQuestion = { ...question, feedbackEventId };
-      try {
-        const payload = await requestJson<JsonPayload>("/api/chat/stream?operation=feedback", {
-          method: "POST",
-          headers: { "Content-Type": "application/json; charset=utf-8" },
-          body: JSON.stringify({
-            feedbackEventId,
-            questionEventId: record.recordId,
-            sessionId: getSessionId(storage),
-            mode: "agent",
-            prompt: question.prompt,
-            answer: question.answer.slice(0, 120_000),
-            language: question.language,
-            reasonCode,
-            reasonDetail: text(reasonDetail, 4_000)
-          })
-        });
-        return payload.ok === false ? { ok: false, errorCode: safeErrorCode(payload.errorCode) } : { ok: true };
-      } catch (error) {
-        if (isRecord(error) && Number(error.status) === 409) return { ok: true, alreadyExists: true };
-        return { ok: false, errorCode: "feedback_error" };
-      }
+  function feedbackBridge(resolve: () => QuestionContext | null): AgentFeedback {
+    function markSubmitted(question: QuestionContext): void {
+      question.submitted = true;
+      history = history.map((message) => message.answerId === question.eventId ? { ...message, feedbackState: "submitted" } : message);
+      messages = messages.map((message) => message.answerId === question.eventId ? { ...message, feedbackState: "submitted" } : message);
+      notify();
     }
-  };
+
+    return {
+      isAvailable: () => Boolean(resolve()?.answer.trim() && !resolve()?.submitted),
+      async submit(reasonCode: string, reasonDetail = ""): Promise<AgentFeedbackResult> {
+        const question = resolve();
+        const allowed = ["inaccurate", "not_answered", "incomplete_data", "unclear", "other"];
+        if (!question || !question.answer.trim() || question.submitted) return { ok: false, errorCode: "feedback_unavailable" };
+        if (!allowed.includes(reasonCode)) return { ok: false, errorCode: "invalid_reason" };
+        const record = await (question.completionPromise || question.recordPromise);
+        if (!record || options.enableQuestionLogging === false) return { ok: false, errorCode: "question_log_unavailable" };
+        const feedbackEventId = question.feedbackEventId || randomUuid();
+        question.feedbackEventId = feedbackEventId;
+        try {
+          const payload = await requestJson<JsonPayload>("/api/chat/stream?operation=feedback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json; charset=utf-8" },
+            body: JSON.stringify({
+              feedbackEventId,
+              questionEventId: record.recordId,
+              sessionId: getSessionId(storage),
+              mode: "agent",
+              prompt: question.prompt,
+              answer: question.answer.slice(0, 120_000),
+              language: question.language,
+              reasonCode,
+              reasonDetail: text(reasonDetail, 4_000)
+            })
+          });
+          if (payload.ok === false) return { ok: false, errorCode: safeErrorCode(payload.errorCode) };
+          markSubmitted(question);
+          return { ok: true };
+        } catch (error) {
+          if (isRecord(error) && Number(error.status) === 409) {
+            markSubmitted(question);
+            return { ok: true, alreadyExists: true };
+          }
+          return { ok: false, errorCode: "feedback_error" };
+        }
+      }
+    };
+  }
+
+  const feedback = feedbackBridge(() => currentQuestion);
+
+  function feedbackForAnswer(answerId: string): AgentFeedback | null {
+    if (!answerContexts.has(answerId)) return null;
+    return feedbackBridge(() => answerContexts.get(answerId) || null);
+  }
 
   function setLanguage(language: UiLanguage): void {
     currentLanguage = language === "en" ? "en" : "zh";
@@ -2286,6 +2323,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     omittedTargets = [];
     errorCode = null;
     currentQuestion = null;
+    answerContexts.clear();
     lastResultOk = false;
     memory = emptyAgentMemory();
     saveAgentMemory(storage, memory);
@@ -2331,6 +2369,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     executeTool: executeFrontendTool,
     onChange,
     feedback,
+    feedbackForAnswer,
     downloadLogs,
     dispose
   };

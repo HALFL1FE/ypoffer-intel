@@ -3,6 +3,7 @@ import type { UiLanguage } from "../../../shared/i18n";
 import type { ChatbotReportSummary } from "../chatbotReportModel";
 import type { ChatbotDataSource, ChatbotReportViewResult } from "../chatbotViewTypes";
 import { mergeChatbotKeywords } from "../chatbotKeywords";
+import { normalizeChatbotText } from "../chatbotModel";
 import { buildAnalysisReport, analysisText } from "./analysisReports";
 import { buildEntityReport, matchesCategory, normalizeOfferRow, rowAsins, rowMerchantId, rowMerchantName, rowTier } from "./entityReports";
 import { buildPaymentReport, paymentReportColumns } from "./paymentReports";
@@ -749,7 +750,10 @@ export async function runReportEngine(options: ReportEngineRunOptions): Promise<
     const entityQuery: ReportQuery = query.intent === "merchant" && detailMerchantId && !query.merchantIds.length && !query.merchantNames.length
       ? { ...query, merchantIds: [detailMerchantId] }
       : query;
-    const payload = buildEntityReport(entityQuery, offers, productKeywords, language);
+    const exactQuery: ReportQuery = entityQuery.intent === "keyword"
+      ? { ...entityQuery, semanticAlternatives: [] }
+      : entityQuery;
+    const payload = buildEntityReport(exactQuery, offers, productKeywords, language);
     rows = payload.rows;
     status = payload.status;
     title = payload.title;
@@ -779,17 +783,50 @@ export async function runReportEngine(options: ReportEngineRunOptions): Promise<
         if (remoteRows.length) {
           const remoteQuery = entityQuery.intent === "merchant" && entityQuery.lookupText && !entityQuery.merchantIds.length && !entityQuery.merchantNames.length
             ? { ...entityQuery, merchantNames: [entityQuery.lookupText] }
-            : entityQuery;
-          const fallback = buildEntityReport(remoteQuery, remoteRows, productKeywords, language);
+            : exactQuery;
+          const fallback = buildEntityReport(remoteQuery, remoteRows, entityQuery.intent === "keyword" ? {} : productKeywords, language);
           rows = fallback.rows;
           status = fallback.status;
           note = fallback.note;
           unmatched = fallback.unmatched;
-          source = { ...source, kind: "db" };
+          if (rows.length) source = { ...source, kind: "db" };
         }
       } catch (error) {
         if (isRecord(error) && error.name === "AbortError") throw error;
         // 保持 not_found，不把未知实体扩大为全量。
+      }
+    }
+    if (!rows.length && entityQuery.intent === "keyword" && entityQuery.semanticAlternatives?.length) {
+      const tried = new Set([normalizeChatbotText(entityQuery.keyword)]);
+      for (const candidate of entityQuery.semanticAlternatives.slice(0, 3)) {
+        const normalized = normalizeChatbotText(candidate);
+        if (!normalized || tried.has(normalized)) continue;
+        tried.add(normalized);
+        const candidateQuery: ReportQuery = { ...exactQuery, keyword: candidate };
+        let fallback = buildEntityReport(candidateQuery, offers, productKeywords, language);
+        let foundInDb = false;
+        if (!fallback.rows.length) {
+          try {
+            const searchPayload = await options.provider.search(candidate, signal);
+            abortIfNeeded(signal);
+            const remoteRows = reportRowsFromPayload(searchPayload);
+            if (remoteRows.length) {
+              fallback = buildEntityReport(candidateQuery, remoteRows, {}, language);
+              foundInDb = fallback.rows.length > 0;
+            }
+          } catch (error) {
+            if (isRecord(error) && error.name === "AbortError") throw error;
+          }
+        }
+        if (!fallback.rows.length) continue;
+        rows = fallback.rows;
+        status = fallback.status;
+        note = language === "zh"
+          ? `原词“${entityQuery.keyword}”未命中；以下按候选词“${candidate}”匹配商家，不代表原词精确命中。`
+          : `No exact matches for "${entityQuery.keyword}"; showing merchants matched by candidate "${candidate}", not exact original matches.`;
+        unmatched = fallback.unmatched;
+        if (foundInDb) source = { ...source, kind: "db" };
+        break;
       }
     }
     reportSummary = summaryForRows(rows);

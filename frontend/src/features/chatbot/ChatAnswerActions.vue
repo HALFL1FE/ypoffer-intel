@@ -30,7 +30,7 @@ const feedbackTrigger = ref<HTMLButtonElement | null>(null);
 const feedbackAvailable = computed(() => props.feedbackState === "available" || Boolean(props.feedback));
 const feedbackLabel = computed(() => feedbackSubmitted.value || props.feedbackState === "submitted"
   ? (props.language === "zh" ? "已反馈" : "Feedback sent")
-  : (props.language === "zh" ? "反馈答案" : "Give feedback"));
+  : (props.language === "zh" ? "👎不满意该回复" : "👎Dissatisfied with this reply"));
 
 function openFeedback(event: MouseEvent): void {
   if (!props.feedback || !feedbackAvailable.value || feedbackSubmitted.value) return;
