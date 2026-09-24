@@ -15,6 +15,7 @@ describe("FeedbackForm", () => {
     });
 
     expect(wrapper.find('[data-feedback-action="open"]').exists()).toBe(true);
+    expect(wrapper.get('[data-feedback-action="open"]').text()).toBe("👎不满意该回复");
     await wrapper.get('[data-feedback-action="open"]').trigger("click");
     expect(wrapper.find('[data-feedback-form]').exists()).toBe(true);
     await wrapper.get('[data-feedback-reason="incomplete_data"]').setValue(true);

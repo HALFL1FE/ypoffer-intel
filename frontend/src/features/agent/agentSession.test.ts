@@ -67,6 +67,33 @@ describe("createAgentSession", () => {
     } });
   });
 
+  it("keeps a feedback target for each completed fallback Agent answer", async () => {
+    let created = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body || "{}"));
+      if (url.includes("operation=questions")) return response(body.action === "create" ? { recordId: `record-${++created}` } : { ok: true });
+      if (url.includes("operation=feedback")) return response({ ok: true });
+      if (url === "/api/chat/agent") return response({ ok: true, contractVersion: "v2", registryVersion: "agent-tools-v1", agentRunId: "ar_feedback_test_1234", content: body.question === "First question" ? "First answer" : "Second answer", toolCalls: [], finishReason: "stop" });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const session = createAgentSession({ offers: [], language: "en", fetcher, enableTrace: false });
+    for (const prompt of ["First question", "Second question"]) {
+      await session.submit({ prompt, language: "en", history: session.getState().history,
+        memoryText: "", signal: new AbortController().signal });
+    }
+    const answers = session.getState().messages?.filter((message) => message.role === "assistant") || [];
+    expect(answers).toHaveLength(2);
+    expect(answers[0]?.answerId).toBeTruthy();
+    expect(answers[1]?.answerId).toBeTruthy();
+    expect(await session.feedbackForAnswer?.(answers[0]!.answerId!)?.submit("unclear", "More detail"))
+      .toMatchObject({ ok: true });
+    const feedbackCall = fetcher.mock.calls.find(([url]) => String(url).includes("operation=feedback"));
+    expect(JSON.parse(String(feedbackCall?.[1]?.body))).toMatchObject({
+      questionEventId: "record-1", prompt: "First question", answer: "First answer"
+    });
+  });
+
   it("按 Report Mode 的关键词匹配返回晚到目录中的商户和命中依据", async () => {
     const keywordOffers = [
       { merchantId: "1001", merchantName: "Vac One", tier: "Tier 1", salesAmount: 500, orders: 5 },

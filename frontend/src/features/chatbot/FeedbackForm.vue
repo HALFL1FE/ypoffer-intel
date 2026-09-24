@@ -23,8 +23,8 @@ const detail = ref("");
 const error = ref("");
 
 const copy = computed(() => props.language === "zh" ? {
-  open: "反馈答案",
-  title: "哪里需要改进？",
+  open: "👎不满意该回复",
+  title: "哪里不满意？",
   subtitle: "请选择一个主要原因，也可以补充说明。",
   reason: "主要原因",
   detail: "补充说明（可选）",
@@ -44,8 +44,8 @@ const copy = computed(() => props.language === "zh" ? {
     other: "其他"
   }
 } : {
-  open: "Give feedback",
-  title: "What could be improved?",
+  open: "👎Dissatisfied with this reply",
+  title: "What was unsatisfactory?",
   subtitle: "Choose one main reason and optionally add details.",
   reason: "Main reason",
   detail: "Additional details (optional)",

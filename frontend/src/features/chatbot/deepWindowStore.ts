@@ -436,6 +436,7 @@ export function createDeepWindowStore(options: DeepWindowStoreOptions = {}): Dee
       ...(result.contentHtml ? { contentHtml: result.contentHtml } : { contentHtml: undefined }),
       ...(nextStatus === "error" ? { errorMessage: result.message } : { errorMessage: undefined }),
       status: nextStatus,
+      feedbackState: result.sessionResult?.feedbackState || "unavailable",
       canCancel: false,
       canExport: nextStatus === "ready",
       canAddMemory: nextStatus === "ready",

@@ -90,6 +90,7 @@ import { reportExportFilename, toExportSheets } from "./features/chatbot/report/
 import type { ReportDocument } from "./features/chatbot/report/reportContracts";
 import AgentPage, { type AgentRunResult, type AgentRunner } from "./features/agent/AgentPage.vue";
 import { createAgentSession, type AgentSession } from "./features/agent/agentSession";
+import { createAgentActivity } from "./features/agent/agentActivity";
 import { createAgentAttachmentStore, type AgentAttachmentStore } from "./features/agent/agentAttachment";
 import { createAgentPublisherBridge } from "./features/agent/agentPublisher";
 import AppShell from "./shell/AppShell.vue";
@@ -872,6 +873,7 @@ const categoryReportFactory: ModernPageFactory = (element): ModernPageController
 
 let modernChatbotSession: ChatbotSession | null = null;
 let modernAgentSession: AgentSession | null = null;
+let modernAgentActivity: ReturnType<typeof createAgentActivity> | null = null;
 let modernAgentAttachmentStore: AgentAttachmentStore | null = null;
 
 function downloadChatbotReport(result: ChatbotReportViewResult): boolean {
@@ -1071,6 +1073,7 @@ window.OI_MODERN_APP = createModernAppApi({
 // The modern entry owns exports and navigation. This bounded host exposes
 // only the operations that modern feature components need.
 window.OI_MODERN_RUNTIME = {
+  createAgentActivity: () => (modernAgentActivity ||= createAgentActivity({ storage: browserStorage() })),
   runAgentPublisher: runAgentPublisherForSnapshot,
   download(type, payload) {
     if (type === "offer-tracker" && isRecord(payload) && Array.isArray(payload.rows)) {
