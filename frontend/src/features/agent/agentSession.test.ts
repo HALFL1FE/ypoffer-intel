@@ -50,6 +50,23 @@ function streamResponse(content: string): Response {
 }
 
 describe("createAgentSession", () => {
+  it("把受限候选词传给关键词工具并返回实际命中词", async () => {
+    const session = createAgentSession({
+      offers: [{ merchantId: "1001", merchantName: "Scooter Store", tier: "Tier 1", productTitles: ["scooter board"] }],
+      language: "en", getProductKeywords: () => ({ ok: true, merchants: [] }),
+      enableQuestionLogging: false, enableTrace: false
+    });
+    const result = await session.executeTool({
+      callId: "keyword-semantic", toolName: "keyword_search",
+      arguments: { keyword: "mobilityscooter", semanticAlternatives: ["mobility scooter", "scooter"] },
+      prompt: "find mobilityscooter", signal: new AbortController().signal
+    });
+
+    expect(result.toolResult.result).toMatchObject({ ok: true, data: {
+      matchedKeyword: "scooter", matchType: "semantic", rows: [{ merchantId: "1001" }]
+    } });
+  });
+
   it("按 Report Mode 的关键词匹配返回晚到目录中的商户和命中依据", async () => {
     const keywordOffers = [
       { merchantId: "1001", merchantName: "Vac One", tier: "Tier 1", salesAmount: 500, orders: 5 },

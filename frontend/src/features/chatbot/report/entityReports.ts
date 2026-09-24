@@ -11,6 +11,7 @@ export interface EntityReportPayload {
   readonly status: "resolved" | "ambiguous" | "not_found" | "needs_input";
   readonly title: string;
   readonly note?: string;
+  readonly matchedKeyword?: string;
 }
 
 const CATEGORY_KEYS = [
@@ -288,7 +289,7 @@ export function buildEntityReport(
       };
     }
     const catalog = keywordCatalogValues(productKeywords);
-    const catalogMatches = catalog.filter((row) => matchesKeyword(row, keyword) || matchesText(keyword, text(row.keyword)));
+    const catalogMatches = catalog.filter((row) => matchesKeyword(row, keyword));
     const offersByMerchantId = new Map(normalized.map((row) => [rowMerchantId(row as RawRecord), row]));
     const visibleCatalog = catalogMatches.filter((row) => {
       const offer = offersByMerchantId.get(rowMerchantId(row as RawRecord));
@@ -344,6 +345,21 @@ export function buildEntityReport(
     rows = query.categories.length ? rows.filter((row) => matchesCategory(row, query.categories)) : rows;
   }
 
+  if (query.intent === "keyword" && !rows.length && query.resolution === "resolved" && query.keyword) {
+    const tried = new Set([normalizeChatbotText(query.keyword)]);
+    for (const candidate of (query.semanticAlternatives || []).slice(0, 3)) {
+      const normalized = normalizeChatbotText(candidate);
+      if (!normalized || tried.has(normalized)) continue;
+      tried.add(normalized);
+      const fallback = buildEntityReport({ ...query, keyword: candidate, semanticAlternatives: [] }, offers, productKeywords, language);
+      if (!fallback.rows.length) continue;
+      const note = language === "zh"
+        ? `原词“${query.keyword}”未命中；以下按候选词“${candidate}”匹配商家，不代表原词精确命中。`
+        : `No exact matches for "${query.keyword}"; showing merchants matched by candidate "${candidate}", not exact original matches.`;
+      return { ...fallback, matchedKeyword: candidate, note };
+    }
+  }
+
   const status = query.resolution === "needs_input"
     ? "needs_input"
     : ambiguous.length || (query.merchantNames.length && !rows.length && !unmatched.length) ? "ambiguous"
@@ -357,6 +373,7 @@ export function buildEntityReport(
     ambiguous,
     status,
     title: localizedTitle(query.intent, language),
+    ...(query.intent === "keyword" && query.keyword ? { matchedKeyword: query.keyword } : {}),
     ...(note ? { note } : {})
   };
 }

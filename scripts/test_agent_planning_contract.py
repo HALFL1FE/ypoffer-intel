@@ -141,6 +141,9 @@ def test_six_merchant_top_asins_plan_preserves_signed_view():
     assert payload["planProof"]
     for prompt in (chat_agent_http.PLANNING_PROMPT_ZH, chat_agent_http.PLANNING_PROMPT_EN):
         assert "view=top_asins" in prompt
+        assert "semanticAlternatives" in prompt
+    for prompt in (chat_agent_http.SYNTHESIS_PROMPT_ZH, chat_agent_http.SYNTHESIS_PROMPT_EN):
+        assert "matchedKeyword" in prompt and "matchType" in prompt
 
 
 def main():

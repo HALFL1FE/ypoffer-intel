@@ -1448,8 +1448,11 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     const keyword = typeof args.keyword === "string" ? args.keyword.trim() : "";
     const mode = args.mode === undefined ? "search" : args.mode;
     const limit = args.limit === undefined ? 10 : args.limit;
+    const alternatives = args.semanticAlternatives === undefined ? [] : args.semanticAlternatives;
     if (keyword.length < 2 || keyword.length > 120 || (mode !== "search" && mode !== "recommendation")
-      || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 20) {
+      || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 20
+      || !Array.isArray(alternatives) || alternatives.length > 3
+      || alternatives.some((value) => typeof value !== "string" || value.trim().length < 2 || value.trim().length > 120)) {
       return failure("invalid_arguments", "unavailable", { status: "invalid_filter", field: "keyword" });
     }
     const provider = createReportDataProvider({
@@ -1478,7 +1481,7 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     if (keywordUnavailable && !offerRows.length) {
       return failure("tool_error", "unavailable", { status: "unavailable", field: "keywords" });
     }
-    const data = searchAgentKeywords(keyword, mode, Number(limit), offerRows, keywordUnavailable ? {} : productKeywords, currentLanguage, keywordUnavailable);
+    const data = searchAgentKeywords(keyword, mode, Number(limit), offerRows, keywordUnavailable ? {} : productKeywords, currentLanguage, keywordUnavailable, alternatives);
     const source = provider.snapshot();
     const dataSource: DataSource = source.offersLoadedFrom === "db" ? "mixed" : "cache";
     const rawCheckedAt = isRecord(productKeywords) && typeof productKeywords.checkedAt === "string" ? productKeywords.checkedAt : "";

@@ -61,6 +61,7 @@ export interface ReportQuery {
   readonly categories: readonly string[];
   readonly tiers: readonly ReportTier[];
   readonly keyword?: string;
+  readonly semanticAlternatives?: readonly string[];
   readonly count?: number;
   readonly metricFilters: readonly {
     readonly field: ReportMetric;

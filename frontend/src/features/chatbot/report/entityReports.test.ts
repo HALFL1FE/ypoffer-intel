@@ -108,4 +108,42 @@ describe("entityReports", () => {
     const result = buildEntityReport(query, offers, productKeywords, "en");
     expect(result.rows.map((row) => row.merchantId)).toEqual(["1001"]);
   });
+
+  it("原词无命中时依次尝试候选词，并标明实际查询词", () => {
+    const query = resolveReportQuery("查询mobilityscooter", {
+      language: "zh", categories: [],
+      classification: { intent: "keyword", params: {
+        keywordSearch: "mobilityscooter", semanticAlternatives: ["mobility scooter", "scooter"]
+      } }
+    });
+    const offers = [{ merchantId: "1001", merchantName: "Scooter Store", tier: "Tier 1", productTitles: ["scooter board"] }];
+    const result = buildEntityReport(query, offers, {}, "zh");
+
+    expect(result.rows.map((row) => row.merchantId)).toEqual(["1001"]);
+    expect(result.matchedKeyword).toBe("scooter");
+    expect(result.note).toContain("mobilityscooter");
+    expect(result.note).toContain("scooter");
+  });
+
+  it("原词有命中时不扩大到更宽泛的候选词", () => {
+    const query = resolveReportQuery("/keyword: mobilityscooter", { language: "zh", categories: [] });
+    const offers = [
+      { merchantId: "1001", merchantName: "Exact", tier: "Tier 1", productTitles: ["mobilityscooter"] },
+      { merchantId: "1002", merchantName: "Broad", tier: "Tier 1", productTitles: ["scooter board"] }
+    ];
+    const result = buildEntityReport({ ...query, semanticAlternatives: ["scooter"] }, offers, {}, "zh");
+
+    expect(result.rows.map((row) => row.merchantId)).toEqual(["1001"]);
+    expect(result.matchedKeyword).toBe("mobilityscooter");
+  });
+
+  it("目录短关键词不能反向冒充原词精确命中", () => {
+    const query = resolveReportQuery("/keyword: mobilityscooter", { language: "zh", categories: [] });
+    const result = buildEntityReport({ ...query, semanticAlternatives: ["scooter"] }, [], {
+      merchants: [{ merchantId: "1001", merchantName: "Board Shop", keyword: "scooter" }]
+    }, "zh");
+    expect(result.rows.map((row) => row.merchantId)).toEqual(["1001"]);
+    expect(result.matchedKeyword).toBe("scooter");
+    expect(result.note).toContain("原词“mobilityscooter”未命中");
+  });
 });
