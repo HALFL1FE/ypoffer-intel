@@ -25,6 +25,69 @@ function context(): ReportEngineContext {
 }
 
 describe("reportEngine actions", () => {
+  it("先查询原词的远程精确结果，再考虑本地宽泛候选词", async () => {
+    const localOffers = [{ merchantId: "1001", merchantName: "Board Shop", tier: "Tier 1", productTitles: ["scooter board"] }];
+    const loadSearch = vi.fn(async () => ({ rows: [
+      { merchantId: "2001", merchantName: "Mobility Shop", tier: "Tier 1", productTitles: ["mobilityscooter"] }
+    ] }));
+    const query = resolveReportQuery("查询mobilityscooter", {
+      language: "zh", categories: [], classification: { intent: "keyword", params: {
+        keywordSearch: "mobilityscooter", semanticAlternatives: ["scooter"]
+      } }
+    });
+    const document = await executeReport(query, {
+      offers: localOffers, paymentRecords: [], productKeywords: { merchants: [] },
+      provider: createReportDataProvider({ offers: localOffers, loadSearch }),
+      now: () => new Date("2026-09-08T00:00:00Z")
+    }, new AbortController().signal);
+
+    expect(loadSearch).toHaveBeenCalledWith("mobilityscooter", expect.any(AbortSignal));
+    expect(document.rows.map((row) => row.merchantId)).toEqual(["2001"]);
+  });
+
+  it("原词本地和远程均无命中时在报告中注明实际候选词", async () => {
+    const localOffers = [{ merchantId: "1001", merchantName: "Board Shop", tier: "Tier 1", productTitles: ["scooter board"] }];
+    const query = resolveReportQuery("查询mobilityscooter", {
+      language: "zh", categories: [], classification: { intent: "keyword", params: {
+        keywordSearch: "mobilityscooter", semanticAlternatives: ["mobility scooter", "scooter"]
+      } }
+    });
+    const document = await executeReport(query, {
+      offers: localOffers, paymentRecords: [], productKeywords: { merchants: [] },
+      provider: createReportDataProvider({ offers: localOffers, loadSearch: async () => ({ rows: [] }) }),
+      now: () => new Date("2026-09-08T00:00:00Z")
+    }, new AbortController().signal);
+
+    expect(document.intent).toBe("keyword");
+    expect(document.rows.map((row) => row.merchantId)).toEqual(["1001"]);
+    expect(document.blocks.find((block) => block.id === "report-note")).toMatchObject({
+      kind: "notice", text: expect.stringContaining("候选词“scooter”")
+    });
+  });
+
+  it("优先查询第一个候选词的远程结果，再尝试第二个本地候选词", async () => {
+    const localOffers = [{ merchantId: "1002", merchantName: "Broad Shop", tier: "Tier 1", productTitles: ["scooter board"] }];
+    const loadSearch = vi.fn(async (term: string) => ({ rows: term === "mobility scooter" ? [
+      { merchantId: "1001", merchantName: "Mobility Shop", tier: "Tier 1", productTitles: ["mobility scooter"] }
+    ] : [] }));
+    const query = resolveReportQuery("查询mobilityscooter", {
+      language: "zh", categories: [], classification: { intent: "keyword", params: {
+        keywordSearch: "mobilityscooter", semanticAlternatives: ["mobility scooter", "scooter"]
+      } }
+    });
+    const document = await executeReport(query, {
+      offers: localOffers, paymentRecords: [], productKeywords: { merchants: [] },
+      provider: createReportDataProvider({ offers: localOffers, loadSearch }),
+      now: () => new Date("2026-09-08T00:00:00Z")
+    }, new AbortController().signal);
+
+    expect(loadSearch).toHaveBeenCalledWith("mobility scooter", expect.any(AbortSignal));
+    expect(document.rows.map((row) => row.merchantId)).toEqual(["1001"]);
+    expect(document.blocks.find((block) => block.id === "report-note")).toMatchObject({
+      kind: "notice", text: expect.stringContaining("候选词“mobility scooter”")
+    });
+  });
+
   it("缓存未命中 Merchant 时使用远程搜索结果而不退化为全量列表", async () => {
     const loadSearch = vi.fn(async () => ({
       rows: [{

@@ -3,6 +3,60 @@ import { describe, expect, it } from "vitest";
 import { resolveReportQuery } from "./reportQuery";
 
 describe("resolveReportQuery", () => {
+  it("将分类器识别的产品词查询路由到关键词报告", () => {
+    const query = resolveReportQuery("查询mobilityscooter", {
+      language: "zh",
+      categories: [],
+      classification: {
+        intent: "keyword",
+        params: { keywordSearch: "mobilityscooter", semanticAlternatives: ["mobility scooter", "scooter"] }
+      }
+    });
+
+    expect(query).toMatchObject({
+      intent: "keyword",
+      keyword: "mobilityscooter",
+      semanticAlternatives: ["mobility scooter", "scooter"]
+    });
+  });
+
+  it("查询词没有推荐措辞时不因分类器误判而返回全站推荐", () => {
+    const query = resolveReportQuery("查询mobilityscooter", {
+      language: "zh",
+      categories: [],
+      classification: { intent: "recommendation", params: { keywordSearch: "mobilityscooter" } }
+    });
+
+    expect(query).toMatchObject({ intent: "keyword", keyword: "mobilityscooter" });
+  });
+
+  it("分类器误判推荐且未提取参数时也不返回全站推荐", () => {
+    const context = { language: "zh" as const, categories: [], merchantCandidates: [{ id: "1001", name: "Merach" }] };
+    expect(resolveReportQuery("查询mobilityscooter", {
+      ...context, classification: { intent: "recommendation", params: {} }
+    })).toMatchObject({ intent: "keyword", keyword: "mobilityscooter" });
+    expect(resolveReportQuery("查询mobilityscooter", context)).toMatchObject({ intent: "keyword", keyword: "mobilityscooter" });
+    expect(resolveReportQuery("查询Merach", context).intent).toBe("merchant");
+  });
+
+  it("分类器漏提取参数时从查询句中保留原始产品词", () => {
+    const query = resolveReportQuery("查询mobilityscooter", {
+      language: "zh", categories: [], classification: { intent: "keyword", params: {} }
+    });
+    expect(query).toMatchObject({ intent: "keyword", keyword: "mobilityscooter" });
+  });
+
+  it("显式关键词命令优先于分类器生成的搜索词", () => {
+    const query = resolveReportQuery("/keyword: scooter", {
+      language: "zh", categories: [],
+      classification: { intent: "keyword", params: {
+        keywordSearch: "mobilityscooter", semanticAlternatives: ["mobility scooter"]
+      } }
+    });
+    expect(query).toMatchObject({ intent: "keyword", keyword: "scooter" });
+    expect(query.semanticAlternatives).toBeUndefined();
+  });
+
   it("uses explicit payment wording before a tier token", () => {
     const query = resolveReportQuery("Tier 2 未付款", { language: "zh", categories: ["Electronics"] });
 

@@ -89,6 +89,42 @@ def test_keyword_search_arguments_and_result_are_bounded():
         assert invalid is None and error["errorCode"] == "invalid_tool_result"
 
 
+def test_keyword_semantic_alternatives_are_bounded_and_attributed():
+    schema = get_agent_tool_definitions("en", ["keyword_search"])[0]["parameters"]
+    assert schema["properties"]["semanticAlternatives"]["maxItems"] == 3
+    valid, error = validate_tool_arguments("keyword_search", {
+        "keyword": "mobilityscooter", "semanticAlternatives": ["mobility scooter", "scooter"]
+    })
+    assert error is None and valid["semanticAlternatives"] == ["mobility scooter", "scooter"]
+    for alternatives in (["x"], ["a", "b", "c", "d"], ["x" * 121]):
+        invalid, error = validate_tool_arguments("keyword_search", {
+            "keyword": "mobilityscooter", "semanticAlternatives": alternatives
+        })
+        assert invalid is None and error["errorCode"] == "invalid_arguments"
+    result, error = validate_tool_result("keyword_search", {"ok": True, "data": {
+        "keyword": "mobilityscooter", "matchedKeyword": "scooter", "matchType": "semantic",
+        "rows": [{"merchantId": "1001", "merchantName": "Board Shop"}]
+    }})
+    assert error is None and result["data"]["matchType"] == "semantic"
+    for match_type, matched_keyword, rows in (
+        ("semantic", "mobilityscooter", [{"merchantId": "1001", "merchantName": "Board Shop"}]),
+        ("exact", "scooter", [{"merchantId": "1001", "merchantName": "Board Shop"}]),
+        ("semantic", "scooter", []),
+    ):
+        invalid, error = validate_tool_result("keyword_search", {"ok": True, "data": {
+            "keyword": "mobilityscooter", "matchedKeyword": matched_keyword,
+            "matchType": match_type, "rows": rows
+        }})
+        assert invalid is None and error["errorCode"] == "invalid_tool_result"
+
+
+def test_chatbot_classifier_registers_keyword_intent():
+    from llm_classify import VALID_INTENTS, _build_system_prompt
+
+    assert "keyword" in VALID_INTENTS
+    assert "mobilityscooter" in _build_system_prompt([])
+
+
 def test_promotion_tool_exposes_merchant_media_view():
     definitions = get_agent_tool_definitions("zh", ["promotion_analysis"])
     view = definitions[0]["parameters"]["properties"]["view"]

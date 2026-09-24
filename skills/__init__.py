@@ -13,6 +13,7 @@ To add a new intent skill:
 from skills.base import registry
 from skills.asin import asin_skill
 from skills.merchant import merchant_skill
+from skills.keyword import keyword_skill
 from skills.payment import payment_skill
 from skills.recommendation import recommendation_skill
 from skills.tier import tier_skill
@@ -23,6 +24,7 @@ from skills.analysis_text import analysis_text_skill
 # Register all intent-classification skills.
 registry.register(asin_skill)
 registry.register(merchant_skill)
+registry.register(keyword_skill)
 registry.register(payment_skill)
 registry.register(recommendation_skill)
 registry.register(tier_skill)
