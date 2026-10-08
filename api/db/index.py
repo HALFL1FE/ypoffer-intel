@@ -3,6 +3,7 @@ from io import BytesIO
 import json
 import logging
 
+from mcp_http import handle_mcp
 from offer_performance import report as offer_performance_report
 from offer_review import handle_request as handle_offer_review
 from auth import _read_json_body, current_user_for_target, require_page_access
@@ -69,6 +70,7 @@ class WsgiTarget:
         self.path = f"{path}?{query}" if query else path
         self.headers = self._request_headers(environ)
         self.headers["Content-Length"] = str(environ.get("CONTENT_LENGTH") or "")
+        self.headers["Content-Type"] = str(environ.get("CONTENT_TYPE") or "")
         self.rfile = environ.get("wsgi.input")
         self.status = 500
         self.response_headers = []
@@ -536,7 +538,9 @@ def app(environ, start_response):
     route = str(target.headers.get("X-Oi-Db-Route") or "").strip()
     query = parse_query(target)
 
-    if method == "OPTIONS":
+    if route == "mcp":
+        handle_mcp(target, method)
+    elif method == "OPTIONS":
         handle_options(
             target,
             methods=(

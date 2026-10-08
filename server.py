@@ -32,6 +32,7 @@ def _load_dotenv(path: str = ".env") -> None:
 _load_dotenv()
 # ------------------------------------
 
+from mcp_http import handle_mcp
 from offer_performance import report as offer_performance_report
 from offer_review import handle_request as handle_offer_review
 from api.tier_moves import handle_tier_moves
@@ -203,6 +204,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path.rstrip("/") in {"/mcp", "/api/mcp"}:
+            handle_mcp(self, "GET")
+            return
         operation = str((parse_qs(parsed.query).get("operation") or [""])[0]).strip().lower()
         if parsed.path == "/api/chat/agui":
             handle_agui_request(self, "GET")
@@ -237,8 +241,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.handle_static(parsed.path)
 
+    def do_DELETE(self):
+        if urlparse(self.path).path.rstrip("/") in {"/mcp", "/api/mcp"}:
+            handle_mcp(self, "DELETE")
+            return
+        self.send_error(405)
+
     def do_OPTIONS(self):
         parsed = urlparse(self.path)
+        if parsed.path.rstrip("/") in {"/mcp", "/api/mcp"}:
+            handle_mcp(self, "OPTIONS")
+            return
         operation = str((parse_qs(parsed.query).get("operation") or [""])[0]).strip().lower()
         if parsed.path == "/api/chat/agui":
             handle_agui_request(self, "OPTIONS")
@@ -264,6 +277,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path.rstrip("/") in {"/mcp", "/api/mcp"}:
+            handle_mcp(self, "POST")
+            return
         if parsed.path == "/api/ui/db/offer-performance":
             if require_page_access(self, "offer-performance"):
                 handle_offer_review(self, "POST", parse_qs(parsed.query))

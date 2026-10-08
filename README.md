@@ -218,6 +218,15 @@ The Apps Script keeps `Tier Overrides` as an audit sheet and also physically rec
 
 If `TIER_MOVES_WEBHOOK_URL` is not configured, move buttons still work locally but the status message says the change is local only.
 
+## Read-only MCP access
+
+The optional `/mcp` (alias `/api/mcp`) endpoint exposes six bounded, read-only
+merchant/ASIN/Offer/Tier/freshness tools without invoking the chatbot or loading
+the frontend. It requires dedicated expiring credentials bound to active users
+and explicit tool grants; it remains unavailable until configured. See
+[the MCP setup and permission guide](docs/read-only-mcp.md) for deployment,
+credential generation, supported clients and validation.
+
 ## Run Locally
 
 macOS/Linux:
