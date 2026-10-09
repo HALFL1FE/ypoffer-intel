@@ -1022,6 +1022,8 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
         return null;
       }
     });
+    answerContexts.set(question.eventId, question);
+    while (answerContexts.size > 50) answerContexts.delete(answerContexts.keys().next().value!);
     return question.completionPromise;
   }
 
@@ -2003,10 +2005,6 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
         ...(currentQuestion ? { answerId: currentQuestion.eventId, feedbackState: "available" as const } : {})
       }].slice(-MAX_HISTORY);
       messages = history.slice();
-      if (currentQuestion) {
-        answerContexts.set(currentQuestion.eventId, currentQuestion);
-        while (answerContexts.size > 50) answerContexts.delete(answerContexts.keys().next().value!);
-      }
       if (events.length) {
         memory = applyAgentMemoryEvents(memory, events, Date.now());
         saveAgentMemory(storage, memory);
@@ -2257,11 +2255,11 @@ export function createAgentSession(options: AgentSessionOptions): AgentSession {
     }
 
     return {
-      isAvailable: () => Boolean(resolve()?.answer.trim() && !resolve()?.submitted),
+      isAvailable: () => Boolean(resolve()?.completionPromise && !resolve()?.submitted),
       async submit(reasonCode: string, reasonDetail = ""): Promise<AgentFeedbackResult> {
         const question = resolve();
         const allowed = ["inaccurate", "not_answered", "incomplete_data", "unclear", "other"];
-        if (!question || !question.answer.trim() || question.submitted) return { ok: false, errorCode: "feedback_unavailable" };
+        if (!question?.completionPromise || question.submitted) return { ok: false, errorCode: "feedback_unavailable" };
         if (!allowed.includes(reasonCode)) return { ok: false, errorCode: "invalid_reason" };
         const record = await (question.completionPromise || question.recordPromise);
         if (!record || options.enableQuestionLogging === false) return { ok: false, errorCode: "question_log_unavailable" };

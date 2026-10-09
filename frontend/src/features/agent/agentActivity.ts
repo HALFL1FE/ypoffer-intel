@@ -89,9 +89,9 @@ export function createAgentActivity(options: { readonly storage?: Storage; reado
     const context = answers.get(id);
     if (!context) return null;
     return {
-      isAvailable: () => Boolean(context.answer && !context.submitted),
+      isAvailable: () => Boolean(context.completed && !context.submitted),
       async submit(reasonCode: string, reasonDetail = ""): Promise<AgentFeedbackResult> {
-        if (!context.answer || context.submitted) return { ok: false, errorCode: "feedback_unavailable" };
+        if (!context.completed || context.submitted) return { ok: false, errorCode: "feedback_unavailable" };
         if (!["inaccurate", "not_answered", "incomplete_data", "unclear", "other"].includes(reasonCode)) {
           return { ok: false, errorCode: "invalid_reason" };
         }

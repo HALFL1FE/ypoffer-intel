@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, useId, watch } from "vue";
 
 import type { ChatbotAnswerFeedbackState, ChatbotFeedback } from "./chatbotViewTypes";
 import type { UiLanguage } from "../../shared/i18n";
@@ -12,12 +12,16 @@ const props = withDefaults(defineProps<{
   readonly feedbackState?: ChatbotAnswerFeedbackState;
   readonly feedback?: ChatbotFeedback | null;
   readonly refreshKey?: number;
+  readonly feedbackLabel?: string;
+  readonly feedbackPrompt?: string;
 }>(), {
   answerId: "",
   canOpenDeep: false,
   feedbackState: "unavailable",
   feedback: null,
-  refreshKey: 0
+  refreshKey: 0,
+  feedbackLabel: "",
+  feedbackPrompt: ""
 });
 
 const emit = defineEmits<{
@@ -26,16 +30,21 @@ const emit = defineEmits<{
 
 const feedbackOpen = ref(false);
 const feedbackSubmitted = ref(false);
+const feedbackPromptDismissed = ref(false);
+const feedbackPromptId = useId();
 const feedbackTrigger = ref<HTMLButtonElement | null>(null);
 const feedbackAvailable = computed(() => props.feedbackState === "available" || Boolean(props.feedback));
-const feedbackLabel = computed(() => feedbackSubmitted.value || props.feedbackState === "submitted"
+const showFeedbackPrompt = computed(() => props.feedbackPrompt && feedbackAvailable.value
+  && !feedbackPromptDismissed.value && !feedbackSubmitted.value && props.feedbackState !== "submitted");
+const buttonLabel = computed(() => feedbackSubmitted.value || props.feedbackState === "submitted"
   ? (props.language === "zh" ? "已反馈" : "Feedback sent")
-  : (props.language === "zh" ? "👎不满意该回复" : "👎Dissatisfied with this reply"));
+  : props.feedbackLabel || (props.language === "zh" ? "👎不满意该回复" : "👎Dissatisfied with this reply"));
 
 function openFeedback(event: MouseEvent): void {
   if (!props.feedback || !feedbackAvailable.value || feedbackSubmitted.value) return;
   feedbackTrigger.value = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
   feedbackOpen.value = true;
+  feedbackPromptDismissed.value = true;
 }
 
 function markSubmitted(): void {
@@ -46,6 +55,7 @@ watch(() => [props.refreshKey, props.answerId], () => {
   feedbackSubmitted.value = false;
   feedbackOpen.value = false;
   feedbackTrigger.value = null;
+  feedbackPromptDismissed.value = false;
 });
 </script>
 
@@ -54,6 +64,7 @@ watch(() => [props.refreshKey, props.answerId], () => {
     <button v-if="canOpenDeep" type="button" data-chatbot-action="open-chat-deep" @click="emit('open')">
       {{ language === 'zh' ? '转为 View' : 'Open as View' }}
     </button>
+    <span v-if="showFeedbackPrompt" :id="feedbackPromptId" class="chat-feedback-prompt" data-feedback-prompt role="status">{{ feedbackPrompt }}</span>
     <button
       v-if="feedbackAvailable"
       type="button"
@@ -61,8 +72,9 @@ watch(() => [props.refreshKey, props.answerId], () => {
       data-feedback-action="open"
       :data-feedback-status="feedbackSubmitted || feedbackState === 'submitted' ? 'submitted' : 'available'"
       :disabled="feedbackSubmitted || feedbackState === 'submitted'"
+      :aria-describedby="showFeedbackPrompt ? feedbackPromptId : undefined"
       @click="openFeedback"
-    >{{ feedbackLabel }}</button>
+    >{{ buttonLabel }}</button>
     <AnswerFeedbackDialog
       v-model:open="feedbackOpen"
       :language="language"

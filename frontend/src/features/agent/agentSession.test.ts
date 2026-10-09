@@ -50,6 +50,30 @@ function streamResponse(content: string): Response {
 }
 
 describe("createAgentSession", () => {
+  it("规划失败后也能反馈本轮，等待问题完成记录且保留失败轮的反馈关联", async () => {
+    let created = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body || "{}"));
+      if (url.includes("operation=questions")) return response(body.action === "create" ? { recordId: `record-${++created}` } : { ok: true });
+      if (url.includes("operation=feedback")) return response({ ok: true });
+      return response({ ok: false, errorCode: "agent_planning_unavailable" }, 503);
+    });
+    const session = createAgentSession({ offers: [], language: "zh", fetcher, enableTrace: false });
+    const result = await session.submit({ prompt: "你好", language: "zh", history: [], memoryText: "", signal: new AbortController().signal });
+    expect(result.status).toBe("error");
+    expect(session.getState().history).toEqual([]);
+    const creation = JSON.parse(String(fetcher.mock.calls.find(([, init]) => JSON.parse(String(init?.body || "{}")).action === "create")?.[1]?.body));
+    const feedback = session.feedbackForAnswer?.(creation.eventId);
+    expect(feedback?.isAvailable()).toBe(true);
+    await session.submit({ prompt: "下一轮", language: "zh", history: [], memoryText: "", signal: new AbortController().signal });
+    expect(await feedback?.submit("not_answered", "运行失败")).toEqual({ ok: true });
+    const submission = fetcher.mock.calls.find(([url]) => String(url).includes("operation=feedback"));
+    expect(JSON.parse(String(submission?.[1]?.body))).toMatchObject({ questionEventId: "record-1", prompt: "你好", answer: "", mode: "agent" });
+    expect(feedback?.isAvailable()).toBe(false);
+    expect(session.feedback?.isAvailable()).toBe(true);
+  });
+
   it("把受限候选词传给关键词工具并返回实际命中词", async () => {
     const session = createAgentSession({
       offers: [{ merchantId: "1001", merchantName: "Scooter Store", tier: "Tier 1", productTitles: ["scooter board"] }],
