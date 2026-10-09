@@ -804,6 +804,8 @@ Agent 欢迎区会提示“已恢复上下文”；点击“新对话”或退�
 - 反馈必须单选一个原因（回答不准确、没有回答问题、数据不完整、内容难以理解、其他），补充说明可选。提交失败时保留表单并允许重试。
 - Chat Mode 保存该次回答的原始 Markdown；Report Mode 在点击按钮时保存对应报告窗口当前可见文本。回答上限为 256 KB UTF-8，超出时安全截断并记录 `answerTruncated`。
 - 反馈表为 `cnpscy_oi_chatbot_answer_feedback`，通过 `questionEventId` 与提问日志一对一关联，并区分 `report` / `chat` / `agent` 模式；独立 Agent 的成功直答、流式综合和 fallback 回答都复用同一反馈入口。
+- 独立 Agent 的反馈按钮使用更大的点击区域、文字和对比色。运行失败或停止后也提供反馈入口；执行失败、数据查询或工具调用失败/超时时，按钮旁显示提醒气泡，点击后收起，正常成功回答不显示提醒。
+- Agent 反馈等待本轮提问日志完成后提交；服务端允许 `agent` 模式关联 `failed` 提问记录，此时回答可为空，不伪造回答。成功轮仍要求非空回答，其他模式仍要求成功记录；会话、模式、问题匹配与每轮一次反馈的约束保持不变。
 - 不满意反馈使用现有 `POST /api/chat/stream?operation=feedback` 写入；「日志 / Logs」菜单内与提问记录分组展示，分别通过 `GET /api/chat/stream?operation=feedback&format=csv|jsonl` 独立导出。
 - 共享领域与 HTTP 处理分别位于 `chatbot_answer_feedback.py`、`chatbot_answer_feedback_http.py`；没有新增 Vercel 路由文件。
 - 两张表的 `mode` 字段本身是 `VARCHAR(16)`，因此本次只扩展业务值，不新增表或执行 schema 迁移。

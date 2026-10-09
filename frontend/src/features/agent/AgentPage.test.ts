@@ -4,11 +4,81 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AgentPage, { type AgentRunResult, type AgentRunner } from "./AgentPage.vue";
 import { normalizeAgentResultView } from "../../shared/contracts/agentResult";
-import type { AgentSessionResult, AgentSessionState, AgentViewSession } from "./agentSession";
+import { createAgentSession, type AgentSessionResult, type AgentSessionState, type AgentViewSession } from "./agentSession";
+import { createAgentActivity } from "./agentActivity";
 import { clearAgentViewSnapshot } from "./agentViewState";
 
 describe("AgentPage", () => {
   beforeEach(() => clearAgentViewSnapshot("modern-agent"));
+
+  it.each(["error", "throw", "tool-error", "tool-timeout"])("%s 场景主动显示提醒气泡并提交本轮反馈", async (scenario) => {
+    const previousRuntime = window.OI_MODERN_RUNTIME;
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body || "{}"));
+      return new Response(JSON.stringify(payload.action === "create" ? { recordId: "failed-record" } : { ok: true }), { status: 200 });
+    });
+    window.OI_MODERN_RUNTIME = { createAgentActivity: () => createAgentActivity({ fetcher }) } as never;
+    const run = vi.fn<AgentRunner>(async () => {
+      if (scenario === "throw") throw new Error("查询服务不可用");
+      const recovered = scenario.startsWith("tool-");
+      return {
+        ok: recovered, status: recovered ? "done" : "error", response: recovered ? "部分查询结果" : "",
+        steps: [{ id: "tool-data", phase: "tool", status: scenario === "tool-timeout" ? "timeout" : "error", label: "数据查询" }]
+      };
+    });
+    const wrapper = mount(AgentPage, { props: { language: "zh", run, autoFocus: false } });
+    try {
+      await wrapper.get('[data-agent-input]').setValue("查询商户数据");
+      await wrapper.get('[data-agent-form]').trigger("submit");
+      await flushPromises();
+      const prompt = wrapper.get('[data-feedback-prompt]');
+      expect(prompt.text()).toContain("点击下方按钮反馈");
+      expect(prompt.attributes("role")).toBe("status");
+      const trigger = wrapper.get('[data-feedback-action="open"]');
+      expect(trigger.attributes("aria-describedby")).toBe(prompt.attributes("id"));
+      await trigger.trigger("click");
+      expect(wrapper.find('[data-feedback-prompt]').exists()).toBe(false);
+      const dialog = new DOMWrapper(document.querySelector('[data-answer-feedback-dialog]')!);
+      await dialog.get('[data-feedback-reason="not_answered"]').setValue(true);
+      await dialog.get('[data-feedback-form]').trigger("submit");
+      await flushPromises();
+      const feedbackCall = fetcher.mock.calls.find(([url]) => String(url).includes("operation=feedback"));
+      expect(JSON.parse(String(feedbackCall?.[1]?.body))).toMatchObject({
+        questionEventId: "failed-record", prompt: "查询商户数据", answer: scenario.startsWith("tool-") ? "部分查询结果" : "", reasonCode: "not_answered", mode: "agent"
+      });
+      expect(trigger.text()).toBe("已反馈");
+      expect(trigger.attributes("disabled")).toBeDefined();
+      await wrapper.get('[data-agent-action="new"]').trigger("click");
+      expect(wrapper.find('[data-feedback-action="open"]').exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+      window.OI_MODERN_RUNTIME = previousRuntime;
+    }
+  });
+
+  it("受控 session 运行失败后也展示可提交的反馈入口", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || "{}"));
+      const logging = String(input).includes("operation=");
+      return new Response(JSON.stringify(logging ? body.action === "create" ? { recordId: "session-failed-record" } : { ok: true } : { ok: false, errorCode: "agent_planning_unavailable" }), { status: logging ? 200 : 503 });
+    });
+    const session = createAgentSession({ offers: [], language: "zh", fetcher, enableTrace: false });
+    const wrapper = mount(AgentPage, { props: { language: "zh", run: vi.fn(), session, autoFocus: false } });
+    try {
+      await wrapper.get('[data-agent-input]').setValue("你好");
+      await wrapper.get('[data-agent-form]').trigger("submit");
+      await flushPromises();
+      expect(wrapper.get('[data-feedback-prompt]').text()).toContain("点击下方按钮反馈");
+      await wrapper.get('.aw-notice [data-feedback-action="open"]').trigger("click");
+      const dialog = new DOMWrapper(document.querySelector('[data-answer-feedback-dialog]')!);
+      await dialog.get('[data-feedback-reason="not_answered"]').setValue(true);
+      await dialog.get('[data-feedback-form]').trigger("submit");
+      await flushPromises();
+      const feedbackCall = fetcher.mock.calls.find(([url]) => String(url).includes("operation=feedback"));
+      expect(JSON.parse(String(feedbackCall?.[1]?.body))).toMatchObject({ questionEventId: "session-failed-record", answer: "", mode: "agent" });
+      expect(wrapper.get('.aw-notice [data-feedback-action="open"]').text()).toBe("已反馈");
+    } finally { wrapper.unmount(); session.dispose?.(); }
+  });
 
   it("追问只携带上一轮结果的 ASIN，新对话清空引用", async () => {
     const asins = ["B0D2HKCMBP", "B0GQ3MD31D", "B0CS3JBP67", "B0D2HHDKTD", "B09BVXT8TJ"];
@@ -704,6 +774,7 @@ describe("AgentPage", () => {
       }
       const answers = wrapper.findAll(".aw-message-assistant");
       expect(answers).toHaveLength(2);
+      expect(wrapper.find('[data-feedback-prompt]').exists()).toBe(false);
       expect(answers.map((answer) => answer.get('[data-chatbot-action="feedback"]').text()))
         .toEqual(["👎不满意该回复", "👎不满意该回复"]);
       await answers[0]!.get('[data-chatbot-action="feedback"]').trigger("click");

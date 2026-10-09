@@ -197,7 +197,7 @@ def create_answer_feedback(
     mode = _clean_mode(payload.get("mode"))
     prompt = _clean_text(payload.get("prompt"), "prompt", MAX_PROMPT_BYTES)
     raw_answer = str(payload.get("answer") or "")
-    if not raw_answer.strip():
+    if not raw_answer.strip() and mode != "agent":
         raise AnswerFeedbackValidationError("answer is required")
     answer, answer_truncated = _truncate_utf8(
         raw_answer,
@@ -244,9 +244,11 @@ def create_answer_feedback(
                 question = cursor.fetchone()
             if not question:
                 raise AnswerFeedbackNotFoundError("question log was not found")
-            if str(question.get("status") or "").lower() != "success":
+            question_status = str(question.get("status") or "").lower()
+            failed_agent = mode == "agent" and question_status == "failed"
+            if question_status != "success" and not failed_agent:
                 raise AnswerFeedbackConflictError(
-                    "feedback requires a successful answer",
+                    "feedback requires a completed answer or a failed Agent run",
                     code="question_not_successful",
                 )
             if (
@@ -258,6 +260,8 @@ def create_answer_feedback(
                     "feedback does not match the question log",
                     code="context_mismatch",
                 )
+            if not raw_answer.strip() and not failed_agent:
+                raise AnswerFeedbackValidationError("answer is required")
 
             with conn.cursor() as cursor:
                 cursor.execute(
