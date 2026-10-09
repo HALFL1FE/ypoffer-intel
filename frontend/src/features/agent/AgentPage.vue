@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from "vue";
 
 import type { UiLanguage } from "../../shared/i18n";
 import { renderMarkdownToHtml } from "../../shared/markdown/markdown";
@@ -15,7 +15,7 @@ import { AGENT_COMMANDS, AGENT_MENU_COMMANDS, parseAgentCommand } from "./agentC
 import { appendDiagnosticTurn, diagnosticTurn, type AgentDiagnosticTurn } from "./agentDiagnostics";
 import AgentTimeline from "./AgentTimeline.vue";
 import AgentResultView from "./AgentResultView.vue";
-import type { AgentSessionState, AgentViewSession } from "./agentSession";
+import type { AgentFeedback, AgentSessionState, AgentViewSession } from "./agentSession";
 import { createAgentAttachmentStore, type AgentAttachmentStore, type AgentPromotionAttachment } from "./agentAttachment";
 import { readMerchantWorkbook } from "../../shared/import/merchantWorkbook";
 import { clearAgentViewSnapshot, loadAgentViewSnapshot, saveAgentViewSnapshot } from "./agentViewState";
@@ -100,6 +100,7 @@ const resultViews = ref<AgentResultViewModel[]>([]);
 const memory = ref<AgentMemoryState>(emptyAgentMemory());
 const error = ref("");
 const feedbackRefreshKey = ref(0);
+const failedFeedback = shallowRef<AgentFeedback | null>(null);
 const inputRef = ref<HTMLTextAreaElement | null>(null);
 const inputScrollTop = ref(0);
 const logRef = ref<HTMLElement | null>(null);
@@ -166,6 +167,9 @@ const copy = computed(() => props.language === "zh" ? {
   restored: agentMemoryDisplayText(memory.value, "zh"),
   stopped: "本次 Agent 执行已停止。",
   failed: "本次查询未完成。可以重试，或调整问题后再次发送。",
+  failedFeedback: "反馈本次失败",
+  failureFeedbackPrompt: "本次执行遇到了问题，请点击下方按钮反馈，帮助我们排查。",
+  toolFeedbackPrompt: "数据查询或工具调用遇到了问题，请点击下方按钮反馈，帮助我们排查。",
   details: "查询详情", closeDetails: "收起详情", conversation: "当前对话", you: "你", answer: "Agent",
   ready: "准备就绪", running: "正在分析", done: "查询完成", stopping: "正在停止", stoppedLabel: "已停止", errorLabel: "查询未完成",
   planning: "理解问题", tool: "查询数据", synthesis: "整理答案", preparing: "正在准备查询", receiving: "正在生成回答",
@@ -200,6 +204,9 @@ const copy = computed(() => props.language === "zh" ? {
   restored: agentMemoryDisplayText(memory.value, "en"),
   stopped: "This Agent run was stopped.",
   failed: "This query could not be completed. Try again, or adjust your question.",
+  failedFeedback: "Report this failed run",
+  failureFeedbackPrompt: "This run encountered a problem. Click the button below to report it and help us investigate.",
+  toolFeedbackPrompt: "A data query or tool call encountered a problem. Click the button below to report it and help us investigate.",
   details: "Query details", closeDetails: "Close details", conversation: "Current conversation", you: "You", answer: "Agent",
   ready: "Ready", running: "Analyzing", done: "Query complete", stopping: "Stopping", stoppedLabel: "Stopped", errorLabel: "Query incomplete",
   planning: "Understand", tool: "Query data", synthesis: "Compose answer", preparing: "Preparing your query", receiving: "Writing the answer",
@@ -251,6 +258,14 @@ const resultIndex = computed(() => [
   ...resultViews.value.map((view, index) => ({ target: `${workspaceId}-current-${index}`, title: view.title }))
 ]);
 const visibleMessages = computed(() => messages.value.filter((message, index) => !(props.session && !localSessionOverride.value && runStatus.value === 'running' && message.role === 'assistant' && index === messages.value.length - 1)));
+const hasToolFailure = computed(() => timeline.value.some((step) => step.phase === "tool"
+  && (step.status === "error" || step.status === "timeout" || step.dataSource === "unavailable")));
+const feedbackPrompt = computed(() => hasToolFailure.value ? copy.value.toolFeedbackPrompt : copy.value.failureFeedbackPrompt);
+function feedbackPromptForMessage(id: string): string {
+  const latestAnswer = messages.value.slice().reverse().find((message) => message.role === "assistant");
+  const failedStep = timeline.value.some((step) => step.status === "error" || step.status === "timeout");
+  return runStatus.value === "done" && latestAnswer?.id === id && (failedStep || hasToolFailure.value) ? feedbackPrompt.value : "";
+}
 
 function resizeInput(): void {
   const field = inputRef.value;
@@ -555,12 +570,15 @@ async function submit(): Promise<void> {
     const status = runStatus.value === "done" ? "done" : runStatus.value === "stopped" ? "stopped" : "error";
     const result: AgentRunResult = { ok: status === "done", status, response: response.value, steps: timeline.value, errorCode: attemptError };
     activity?.finish(result);
+    if (status !== "done") failedFeedback.value = props.session && !localSessionOverride.value
+      ? props.session.feedback || null : activity?.feedbackForAnswer?.(activeAnswerId) || null;
     feedbackRefreshKey.value += 1;
     try { diagnostics.value = appendDiagnosticTurn(diagnostics.value, diagnosticTurn(diagnosticRequest, result)); } catch { /* oversized diagnostics do not interrupt an answer */ }
     if (replay) replayComparison.value = { original: replay.response || replay.errorCode, current: response.value || attemptError || copy.value.failed };
     if (status === "error") diagnosticsOpen.value = true;
   }
   lastPrompt.value = prompt;
+  failedFeedback.value = null;
   stopping.value = false;
   followingLatest.value = true;
   if (props.session && !localSessionOverride.value && !command?.command.route && !replay) {
@@ -711,6 +729,8 @@ function newConversation(): void {
   diagnosticsOpen.value = false;
   composerCollapsed.value = false;
   activity?.clear();
+  failedFeedback.value = null;
+  activeAnswerId = "";
   attachmentStore.clear();
   localSessionOverride.value = false;
   followingLatest.value = true;
@@ -873,7 +893,7 @@ onBeforeUnmount(() => {
               <section v-if="message.resultViews?.length" class="agent-modern-results" :aria-label="copy.results">
                 <div v-for="(view, index) in message.resultViews" :id="`${workspaceId}-${message.id}-${index}`" :key="view.id" class="aw-result-anchor"><AgentResultView :language="language" :view="view" /></div>
               </section>
-              <ChatAnswerActions v-if="message.role === 'assistant' && feedbackForMessage(message.id)" :language="language" :answer-id="message.id" :feedback-state="message.feedbackState || 'available'" :feedback="feedbackForMessage(message.id)" />
+              <ChatAnswerActions v-if="message.role === 'assistant' && feedbackForMessage(message.id)" :language="language" :answer-id="message.id" :feedback-state="message.feedbackState || 'available'" :feedback="feedbackForMessage(message.id)" :feedback-prompt="feedbackPromptForMessage(message.id)" />
             </article>
 
             <div v-if="runStatus === 'running'" class="aw-progress" data-agent-progress role="status" aria-live="polite">
@@ -890,7 +910,11 @@ onBeforeUnmount(() => {
             </section>
             <AgentTimeline v-if="timeline.length || runStatus !== 'idle'" :language="language" :status="runStatus" :steps="timeline" :elapsed-ms="runElapsedMs" :partial="partial" :omitted-targets="omittedTargets" />
             <div v-if="error || runStatus === 'stopped'" class="aw-notice" :class="{ 'aw-notice-error': error }" :role="error ? 'alert' : 'status'">
-              <p>{{ error || copy.stopped }}</p><button v-if="lastPrompt" type="button" class="aw-button" data-agent-action="retry" @click="handleExample(lastPrompt)">{{ copy.retry }}</button>
+              <p>{{ error || copy.stopped }}</p>
+              <div class="aw-notice-actions">
+                <ChatAnswerActions v-if="failedFeedback" :language="language" :refresh-key="feedbackRefreshKey" :feedback="failedFeedback" :feedback-label="copy.failedFeedback" :feedback-prompt="runStatus === 'error' ? feedbackPrompt : ''" />
+                <button v-if="lastPrompt" type="button" class="aw-button" data-agent-action="retry" @click="handleExample(lastPrompt)">{{ copy.retry }}</button>
+              </div>
             </div>
             <section v-if="replayComparison" class="aw-replay-comparison" data-agent-replay-comparison>
               <div><h4>{{ language === 'zh' ? '原回答' : 'Original answer' }}</h4><pre>{{ replayComparison.original }}</pre></div>

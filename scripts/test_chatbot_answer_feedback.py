@@ -181,6 +181,31 @@ def main():
     assert_equal(agent_result["ok"], True, "Agent feedback create ok")
     assert "agent" in agent_connection.executed[-1][1]
 
+    failed_agent_connection = FakeConnection(question_row=question_row(mode="agent", status="failed"))
+    failed_agent_result = create_answer_feedback(
+        sample_payload(mode="agent", answer="", reasonCode="not_answered"),
+        connection_factory(failed_agent_connection),
+    )
+    assert_equal(failed_agent_result["ok"], True, "失败的 Agent 可以反馈")
+    assert_equal(failed_agent_connection.executed[-1][1][6], "", "失败轮不伪造回答")
+    assert_equal(failed_agent_connection.committed, True, "失败反馈写入事务")
+    expect_error(
+        AnswerFeedbackValidationError, sample_payload(mode="agent", answer=""),
+        FakeConnection(question_row=question_row(mode="agent")), "成功轮仍要求回答",
+    )
+    expect_error(
+        AnswerFeedbackConflictError, sample_payload(mode="agent"),
+        FakeConnection(question_row=question_row(mode="agent", status="pending")), "未结束的 Agent 不能反馈",
+    )
+    expect_error(
+        AnswerFeedbackConflictError, sample_payload(),
+        FakeConnection(question_row=question_row(status="failed")), "其他模式保留成功回答限制",
+    )
+    expect_error(
+        AnswerFeedbackConflictError, sample_payload(mode="agent", answer="", prompt="其他问题"),
+        FakeConnection(question_row=question_row(mode="agent", status="failed")), "失败反馈也校验问题关联",
+    )
+
     idempotent_connection = FakeConnection(
         question_row=question_row(),
         feedback_row=feedback_row(),
